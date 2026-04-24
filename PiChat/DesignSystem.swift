@@ -52,7 +52,10 @@ enum DS {
             startPoint: .top, endPoint: .bottom
         )
         static let userBubble = LinearGradient(
-            colors: [Color(hex: "#F3F3F3"), Color(hex: "#F3F3F3")],
+            colors: [
+                Color(lightHex: "#F3F3F3", darkHex: "#252A33"),
+                Color(lightHex: "#ECECEC", darkHex: "#1E232C")
+            ],
             startPoint: .topLeading, endPoint: .bottomTrailing
         )
     }
