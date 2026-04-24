@@ -34,7 +34,48 @@ struct ContentView: View {
             // Extension UI dialogs
             ExtensionUIOverlay()
                 .animation(.easeInOut(duration: 0.2), value: state.pendingUIRequest?.id)
+
+            if state.shouldSuggestMoveToApplications {
+                VStack {
+                    MoveToApplicationsBanner()
+                        .padding(.top, DS.Spacing.lg)
+                    Spacer()
+                }
+                .transition(.move(edge: .top).combined(with: .opacity))
+            }
         }
+        .onAppear {
+            state.evaluateInstallLocationSuggestion()
+        }
+    }
+}
+
+struct MoveToApplicationsBanner: View {
+    @EnvironmentObject var state: AppState
+
+    var body: some View {
+        HStack(spacing: DS.Spacing.md) {
+            Image(systemName: "externaldrive.badge.plus")
+                .foregroundStyle(DS.Colors.yellow)
+            Text("Install PiChat to Applications to avoid duplicate app copies.")
+                .font(DS.body(12, weight: .medium))
+                .foregroundStyle(DS.Colors.textPrimary)
+            Button("Open Applications") {
+                state.openApplicationsFolder()
+            }
+            .buttonStyle(.borderedProminent)
+            Button("Dismiss") {
+                state.dismissMoveToApplicationsSuggestion()
+            }
+            .buttonStyle(.bordered)
+        }
+        .padding(.horizontal, DS.Spacing.lg)
+        .padding(.vertical, DS.Spacing.md)
+        .background(DS.Colors.surfaceElevated)
+        .clipShape(RoundedRectangle(cornerRadius: DS.Radius.md))
+        .overlay(RoundedRectangle(cornerRadius: DS.Radius.md).stroke(DS.Colors.border, lineWidth: 1))
+        .shadow(color: .black.opacity(0.15), radius: 8, y: 2)
+        .padding(.horizontal, DS.Spacing.xl)
     }
 }
 

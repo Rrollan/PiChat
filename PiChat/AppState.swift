@@ -190,6 +190,9 @@ class AppState: ObservableObject {
     // MARK: App Update
     @Published var isCheckingForUpdates = false
 
+    // MARK: Install Location Hint
+    @Published var shouldSuggestMoveToApplications = false
+
     let rpc = PiRPCClient()
     private var configManager: PiConfigManager {
         PiConfigManager(configDir: piConfigDirectory)
@@ -658,6 +661,34 @@ class AppState: ObservableObject {
             if l != r { return l > r }
         }
         return false
+    }
+
+    func evaluateInstallLocationSuggestion() {
+        let bundlePath = Bundle.main.bundleURL.path
+        guard bundlePath.hasSuffix(".app") else {
+            shouldSuggestMoveToApplications = false
+            return
+        }
+
+        let isInApplications = bundlePath.hasPrefix("/Applications/") || bundlePath.contains("/Applications/")
+        guard !isInApplications else {
+            shouldSuggestMoveToApplications = false
+            return
+        }
+
+        let dismissKey = "ui.dismissMoveToApplications.\(appVersion)"
+        let dismissed = UserDefaults.standard.bool(forKey: dismissKey)
+        shouldSuggestMoveToApplications = !dismissed
+    }
+
+    func dismissMoveToApplicationsSuggestion() {
+        let dismissKey = "ui.dismissMoveToApplications.\(appVersion)"
+        UserDefaults.standard.set(true, forKey: dismissKey)
+        shouldSuggestMoveToApplications = false
+    }
+
+    func openApplicationsFolder() {
+        NSWorkspace.shared.open(URL(fileURLWithPath: "/Applications", isDirectory: true))
     }
 
     func persistRuntimeSettings() {
