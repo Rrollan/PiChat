@@ -43,10 +43,59 @@ struct ContentView: View {
                 }
                 .transition(.move(edge: .top).combined(with: .opacity))
             }
+
+            if state.keyFeedbackText != nil || state.busyActionText != nil {
+                VStack {
+                    ActionFeedbackOverlay(
+                        shortcut: state.keyFeedbackText,
+                        busyText: state.busyActionText
+                    )
+                    .padding(.top, DS.Spacing.lg)
+                    Spacer()
+                }
+                .transition(.move(edge: .top).combined(with: .opacity))
+            }
         }
         .onAppear {
             state.evaluateInstallLocationSuggestion()
         }
+    }
+}
+
+struct ActionFeedbackOverlay: View {
+    let shortcut: String?
+    let busyText: String?
+
+    var body: some View {
+        HStack(spacing: DS.Spacing.sm) {
+            if let shortcut {
+                Label(shortcut, systemImage: "command")
+                    .font(DS.mono(11, weight: .semibold))
+                    .foregroundStyle(DS.Colors.textSecondary)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(DS.Colors.surface)
+                    .clipShape(Capsule())
+            }
+
+            if let busyText {
+                ProgressView()
+                    .controlSize(.small)
+                Text(busyText)
+                    .font(DS.body(12, weight: .medium))
+                    .foregroundStyle(DS.Colors.textPrimary)
+            } else {
+                Text("Команда принята")
+                    .font(DS.body(12, weight: .medium))
+                    .foregroundStyle(DS.Colors.textPrimary)
+            }
+        }
+        .padding(.horizontal, DS.Spacing.md)
+        .padding(.vertical, DS.Spacing.sm)
+        .background(DS.Colors.surfaceElevated)
+        .clipShape(Capsule())
+        .overlay(Capsule().stroke(DS.Colors.border, lineWidth: 1))
+        .shadow(color: .black.opacity(0.15), radius: 10, y: 4)
     }
 }
 

@@ -92,6 +92,10 @@ class AppState: ObservableObject {
     // MARK: Notifications
     @Published var notification: AppNotification?
 
+    // MARK: Keyboard / Action Feedback
+    @Published var keyFeedbackText: String?
+    @Published var busyActionText: String?
+
     // MARK: Extension UI
     @Published var pendingUIRequest: ExtensionUIRequest?
 
@@ -201,6 +205,8 @@ class AppState: ObservableObject {
     private var currentAssistantMessageIndex: Int?
     private var activeToolCallMap: [String: Int] = [:] // toolCallId -> index in activeTools
     private var responseWatchdogTask: Task<Void, Never>?
+    private var keyFeedbackTask: Task<Void, Never>?
+    private var busyActionDepth = 0
 
     init() {
         let defaults = UserDefaults.standard
@@ -542,14 +548,28 @@ class AppState: ObservableObject {
     }
 
     func startNewSession() async {
-        try? await rpc.newSession()
-        messages.removeAll()
-        activeTools.removeAll()
-        await loadInitialState()
+        beginBusyAction("Создаю новую сессию…")
+        defer { endBusyAction() }
+
+        do {
+            try await rpc.newSession()
+            messages.removeAll()
+            activeTools.removeAll()
+            await loadInitialState()
+        } catch {
+            show(notification: AppNotification(message: "Не удалось создать новую сессию: \(error.localizedDescription)", type: .error))
+        }
     }
 
     func compact() async {
-        try? await rpc.compact()
+        beginBusyAction("Запрашиваю compact…")
+        defer { endBusyAction() }
+
+        do {
+            try await rpc.compact()
+        } catch {
+            show(notification: AppNotification(message: "Не удалось запустить compact: \(error.localizedDescription)", type: .error))
+        }
     }
 
     func setModel(_ model: AgentModel) async {
@@ -1081,6 +1101,28 @@ class AppState: ObservableObject {
             if self.notification?.id == notification.id {
                 self.notification = nil
             }
+        }
+    }
+
+    func acknowledgeShortcut(_ shortcut: String) {
+        keyFeedbackTask?.cancel()
+        keyFeedbackText = shortcut
+
+        keyFeedbackTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 700_000_000)
+            self?.keyFeedbackText = nil
+        }
+    }
+
+    private func beginBusyAction(_ text: String) {
+        busyActionDepth += 1
+        busyActionText = text
+    }
+
+    private func endBusyAction() {
+        busyActionDepth = max(0, busyActionDepth - 1)
+        if busyActionDepth == 0 {
+            busyActionText = nil
         }
     }
 

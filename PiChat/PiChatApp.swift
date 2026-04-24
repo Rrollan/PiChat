@@ -17,11 +17,13 @@ struct PiChatApp: App {
         .commands {
             CommandGroup(replacing: .newItem) {
                 Button("New Session") {
+                    appState.acknowledgeShortcut("⌘N")
                     Task { await appState.startNewSession() }
                 }
                 .keyboardShortcut("n", modifiers: .command)
 
                 Button("Compact Context") {
+                    appState.acknowledgeShortcut("⌘⇧K")
                     Task { await appState.compact() }
                 }
                 .keyboardShortcut("k", modifiers: [.command, .shift])

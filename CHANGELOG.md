@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.0.4] - 2026-04-24
+
+### Added
+- Global action feedback overlay for keyboard shortcuts (e.g. `⌘N`, `⌘⇧K`)
+- Busy-state indicator with spinner and contextual status text for long UI actions
+
+### Changed
+- New Session and Compact actions now surface immediate visual feedback and explicit error notifications
+- Improved perceived responsiveness during keyboard-triggered operations
+
 ## [1.0.3] - 2026-04-24
 
 ### Fixed
