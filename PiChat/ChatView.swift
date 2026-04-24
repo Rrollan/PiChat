@@ -295,9 +295,8 @@ struct AssistantMessageView: View {
     var body: some View {
         HStack(alignment: .top, spacing: DS.Spacing.md) {
             // Avatar
-            ThemedLogo()
+            AssistantReplyAvatar()
                 .frame(width: 28, height: 28)
-                .opacity(0.9)
                 .padding(.top, 2)
 
             VStack(alignment: .leading, spacing: DS.Spacing.sm) {
@@ -336,6 +335,30 @@ struct AssistantMessageView: View {
         }
         .padding(.horizontal, DS.Spacing.xl)
         .padding(.vertical, DS.Spacing.xs)
+    }
+}
+
+struct AssistantReplyAvatar: View {
+    @State private var scale: CGFloat = 1.0
+    @State private var glow: Double = 0.55
+
+    var body: some View {
+        ZStack {
+            Image(systemName: "sparkles")
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundStyle(DS.Colors.textPrimary)
+                .scaleEffect(scale)
+                .shadow(color: DS.Colors.textSecondary.opacity(glow * 0.22), radius: 6)
+                .animation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true), value: scale)
+        }
+        .onAppear {
+            scale = 1.08
+            glow = 0.9
+        }
+        .onDisappear {
+            scale = 1.0
+            glow = 0.55
+        }
     }
 }
 

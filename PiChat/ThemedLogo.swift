@@ -2,22 +2,21 @@ import SwiftUI
 import AppKit
 
 struct ThemedLogo: View {
+    @Environment(\.colorScheme) var colorScheme
+
     var body: some View {
-        if let path = Bundle.module.path(forResource: "sparkle_logo", ofType: "png"),
+        let fileName = colorScheme == .dark ? "pilogo_light" : "pilogo_transparent"
+
+        if let path = Bundle.module.path(forResource: fileName, ofType: "png"),
            let nsImage = NSImage(contentsOfFile: path) {
             Image(nsImage: nsImage)
                 .resizable()
                 .scaledToFit()
-        } else if let fallbackPath = Bundle.module.path(forResource: "pilogo_light", ofType: "png"),
-                  let fallback = NSImage(contentsOfFile: fallbackPath) {
-            Image(nsImage: fallback)
-                .resizable()
-                .scaledToFit()
         } else {
-            Image(systemName: "sparkles")
+            Image(systemName: "questionmark.app.dashed")
                 .resizable()
                 .scaledToFit()
-                .foregroundStyle(DS.Colors.accent)
+                .foregroundColor(.red)
         }
     }
 }
