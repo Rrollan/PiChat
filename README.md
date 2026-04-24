@@ -1,7 +1,11 @@
 # PiChat ⚡️
 
 <p align="center">
-  <img src="docs/images/pichat-logo.png" alt="PiChat Logo" width="220" />
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/images/pichat-logo-light.png" />
+    <source media="(prefers-color-scheme: light)" srcset="docs/images/pichat-logo.png" />
+    <img src="docs/images/pichat-logo-light.png" alt="PiChat Logo" width="220" />
+  </picture>
 </p>
 
 <p align="center">
