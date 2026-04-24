@@ -463,6 +463,12 @@ struct SidebarActionsView: View {
             }
             .help("Refresh")
 
+            IconButton(icon: state.isCheckingForUpdates ? "hourglass" : "arrow.down.app", color: DS.Colors.textSecondary, hoverColor: DS.Colors.green) {
+                Task { await state.updateFromGitHub() }
+            }
+            .disabled(state.isCheckingForUpdates)
+            .help(state.isCheckingForUpdates ? "Checking updates..." : "Update PiChat")
+
             Spacer(minLength: 0)
 
             Button {

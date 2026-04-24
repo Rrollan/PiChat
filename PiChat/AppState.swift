@@ -1,6 +1,7 @@
 import Foundation
 import Combine
 import SwiftUI
+import AppKit
 
 // MARK: - Chat Message Model
 
@@ -185,6 +186,9 @@ class AppState: ObservableObject {
     // MARK: Retry
     @Published var isRetrying = false
     @Published var retryMessage: String?
+
+    // MARK: App Update
+    @Published var isCheckingForUpdates = false
 
     let rpc = PiRPCClient()
     private var configManager: PiConfigManager {
@@ -588,6 +592,74 @@ class AppState: ObservableObject {
         await connect(piPath: piPath, workingDirectory: startupDirectory)
     }
 
+    func updateFromGitHub() async {
+        guard !isCheckingForUpdates else { return }
+        isCheckingForUpdates = true
+        defer { isCheckingForUpdates = false }
+
+        do {
+            let release = try await fetchLatestGitHubRelease()
+            let currentVersion = normalizedVersionString(appVersion)
+            let latestVersion = normalizedVersionString(release.tagName)
+
+            guard isVersion(latestVersion, greaterThan: currentVersion) else {
+                show(notification: AppNotification(message: "У вас уже последняя версия (\(currentVersion))", type: .info))
+                return
+            }
+
+            let download = release.assets?.first(where: { $0.name.lowercased().hasSuffix(".dmg") })?.browserDownloadURL
+            let fallback = "https://github.com/Rrollan/PiChat/releases/latest/download/PiChat-macOS.dmg"
+            guard let url = URL(string: download ?? fallback) else {
+                show(notification: AppNotification(message: "Не удалось сформировать ссылку на обновление", type: .error))
+                return
+            }
+
+            NSWorkspace.shared.open(url)
+            show(notification: AppNotification(message: "Найдена версия \(latestVersion). Открываю загрузку…", type: .success))
+        } catch {
+            show(notification: AppNotification(message: "Не удалось проверить обновления: \(error.localizedDescription)", type: .error))
+        }
+    }
+
+    private var appVersion: String {
+        (Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String) ?? "0.0.0"
+    }
+
+    private func fetchLatestGitHubRelease() async throws -> GitHubRelease {
+        guard let url = URL(string: "https://api.github.com/repos/Rrollan/PiChat/releases/latest") else {
+            throw URLError(.badURL)
+        }
+
+        var request = URLRequest(url: url)
+        request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
+        request.setValue("PiChat", forHTTPHeaderField: "User-Agent")
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
+            throw URLError(.badServerResponse)
+        }
+
+        return try JSONDecoder().decode(GitHubRelease.self, from: data)
+    }
+
+    private func normalizedVersionString(_ raw: String) -> String {
+        raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "v", with: "", options: .caseInsensitive, range: nil)
+    }
+
+    private func isVersion(_ lhs: String, greaterThan rhs: String) -> Bool {
+        let left = lhs.split(separator: ".").map { Int($0) ?? 0 }
+        let right = rhs.split(separator: ".").map { Int($0) ?? 0 }
+        let count = max(left.count, right.count)
+
+        for i in 0..<count {
+            let l = i < left.count ? left[i] : 0
+            let r = i < right.count ? right[i] : 0
+            if l != r { return l > r }
+        }
+        return false
+    }
+
     func persistRuntimeSettings() {
         let defaults = UserDefaults.standard
         defaults.set(piPath, forKey: "pi.runtime.path")
@@ -986,4 +1058,26 @@ struct ExtensionUIRequest: Identifiable {
     let options: [String]?
     let placeholder: String?
     let prefill: String?
+}
+
+struct GitHubRelease: Decodable {
+    let tagName: String
+    let htmlURL: String
+    let assets: [GitHubReleaseAsset]?
+
+    enum CodingKeys: String, CodingKey {
+        case tagName = "tag_name"
+        case htmlURL = "html_url"
+        case assets
+    }
+}
+
+struct GitHubReleaseAsset: Decodable {
+    let name: String
+    let browserDownloadURL: String
+
+    enum CodingKeys: String, CodingKey {
+        case name
+        case browserDownloadURL = "browser_download_url"
+    }
 }
