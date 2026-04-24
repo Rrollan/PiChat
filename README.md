@@ -22,6 +22,34 @@ PiChat is a clean, production-ready SwiftUI desktop app that runs `pi --mode rpc
 
 ---
 
+## ⬇️ Download
+
+👉 **[Download PiChat for macOS (DMG)](https://github.com/Rrollan/PiChat/releases/latest/download/PiChat-macOS.dmg)**
+
+---
+
+## 🧩 Install (macOS)
+
+1. Download `PiChat-macOS.dmg`
+2. Open the DMG file
+3. Drag **PiChat.app** to **Applications**
+4. Open **Applications → PiChat**
+5. If macOS shows a security warning: right-click the app → **Open**
+
+---
+
+## 🚀 First launch
+
+1. Install pi coding agent:
+   ```bash
+   npm install -g @mariozechner/pi-coding-agent
+   ```
+2. Open PiChat
+3. If needed, set `pi` path in Settings (`pi` works by default)
+4. Start chatting
+
+---
+
 ## ✨ Features
 
 - Native SwiftUI UX for macOS
