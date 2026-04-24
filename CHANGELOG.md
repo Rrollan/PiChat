@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.0.2] - 2026-04-24
+
+### Added
+- Persistent agent error logging to `~/Library/Logs/PiChat/agent-errors.log`
+- Timeout watchdog for silent/limit-related agent failures with in-chat warning
+
+### Changed
+- Better RPC stderr handling to surface hidden runtime errors
+- Aligned input controls (paperclip/send) with text input container
+- Replaced in-chat small logo with sparkle icon variant
+
 ## [1.0.0] - 2026-04-24
 
 ### Added
