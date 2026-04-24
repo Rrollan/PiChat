@@ -2,22 +2,22 @@ import SwiftUI
 import AppKit
 
 struct ThemedLogo: View {
-    @Environment(\.colorScheme) var colorScheme
-    
     var body: some View {
-        let fileName = colorScheme == .dark ? "pilogo_light" : "pilogo_transparent"
-        
-        if let path = Bundle.module.path(forResource: fileName, ofType: "png"),
+        if let path = Bundle.module.path(forResource: "sparkle_logo", ofType: "png"),
            let nsImage = NSImage(contentsOfFile: path) {
             Image(nsImage: nsImage)
                 .resizable()
                 .scaledToFit()
-        } else {
-            // Заглушка, если картинка физически не скопировалась
-            Image(systemName: "questionmark.app.dashed")
+        } else if let fallbackPath = Bundle.module.path(forResource: "pilogo_light", ofType: "png"),
+                  let fallback = NSImage(contentsOfFile: fallbackPath) {
+            Image(nsImage: fallback)
                 .resizable()
                 .scaledToFit()
-                .foregroundColor(.red)
+        } else {
+            Image(systemName: "sparkles")
+                .resizable()
+                .scaledToFit()
+                .foregroundStyle(DS.Colors.accent)
         }
     }
 }

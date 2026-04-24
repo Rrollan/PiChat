@@ -151,6 +151,7 @@ enum AgentEvent {
     case autoRetryEnd(success: Bool, attempt: Int, finalError: String?)
     case extensionError(extensionPath: String, event: String, error: String)
     case extensionUIRequest(id: String, method: String, title: String?, message: String?, options: [String]?, placeholder: String?, notifyType: String?, prefill: String?)
+    case processStderr(message: String)
     case response(id: String?, command: String?, success: Bool, error: String?, data: RPCResponseData?)
 }
 
@@ -307,7 +308,13 @@ class PiRPCClient: ObservableObject {
             let data = handle.availableData
             if data.count > 0, let str = String(data: data, encoding: .utf8) {
                 Task { @MainActor in
-                    self?.debugLog("[PI STDERR]: \(str.trimmingCharacters(in: .newlines))")
+                    guard let self else { return }
+                    for rawLine in str.split(whereSeparator: \.isNewline) {
+                        let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
+                        guard !line.isEmpty else { continue }
+                        self.debugLog("[PI STDERR]: \(line)")
+                        self.eventSubject.send(.processStderr(message: line))
+                    }
                 }
             }
         }

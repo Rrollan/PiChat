@@ -200,6 +200,7 @@ class AppState: ObservableObject {
     private var cancellables = Set<AnyCancellable>()
     private var currentAssistantMessageIndex: Int?
     private var activeToolCallMap: [String: Int] = [:] // toolCallId -> index in activeTools
+    private var responseWatchdogTask: Task<Void, Never>?
 
     init() {
         let defaults = UserDefaults.standard
@@ -271,6 +272,7 @@ class AppState: ObservableObject {
     }
 
     func disconnect() {
+        responseWatchdogTask?.cancel()
         rpc.stop()
         isConnected = false
         messages.removeAll()
@@ -317,6 +319,7 @@ class AppState: ObservableObject {
         switch event {
 
         case .agentStart:
+            responseWatchdogTask?.cancel()
             isWaitingForResponse = false
             isStreaming = true
             let msg = ChatMessage(role: .assistant, text: "", isStreaming: true)
@@ -324,6 +327,7 @@ class AppState: ObservableObject {
             currentAssistantMessageIndex = messages.count - 1
 
         case .agentEnd:
+            isWaitingForResponse = false
             isStreaming = false
             if let idx = currentAssistantMessageIndex {
                 messages[idx].isStreaming = false
@@ -406,6 +410,7 @@ class AppState: ObservableObject {
             isRetrying = false
             retryMessage = nil
             if !success, let err = finalError {
+                logAgentError(err, context: "auto_retry_end")
                 addSystemMessage("❌ Failed after retries: \(err)")
             }
 
@@ -426,14 +431,27 @@ class AppState: ObservableObject {
             }
 
         case .extensionError(_, _, let error):
+            logAgentError(error, context: "extension_error")
             addSystemMessage("⚠️ Extension error: \(error)")
 
-        case .response(_, let command, _, let error, let data):
-            if command == "prompt" {
+        case .processStderr(let message):
+            let lowered = message.lowercased()
+            let looksLikeError = lowered.contains("error") || lowered.contains("failed") || lowered.contains("limit") || lowered.contains("429")
+            if looksLikeError {
+                logAgentError(message, context: "pi_stderr")
+            }
+
+        case .response(_, let command, let success, let error, let data):
+            if command == "prompt", !success {
+                responseWatchdogTask?.cancel()
                 isWaitingForResponse = false
             }
             if let e = error {
+                logAgentError(e, context: "response:\(command ?? "unknown")")
                 show(notification: AppNotification(message: e, type: .error))
+                if command == "prompt" {
+                    addSystemMessage("❌ Ошибка ответа агента: \(e)")
+                }
             }
             if command == "set_model" || command == "cycle_model" {
                 if let m = data?.model { currentModel = m }
@@ -454,6 +472,25 @@ class AppState: ObservableObject {
         messages.append(ChatMessage(role: .system, text: text))
     }
 
+    private func logAgentError(_ message: String, context: String) {
+        AgentErrorLogger.log(message, context: context)
+    }
+
+    private func startResponseWatchdog() {
+        responseWatchdogTask?.cancel()
+        responseWatchdogTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 20_000_000_000)
+            guard let self else { return }
+            guard self.isWaitingForResponse, !self.isStreaming else { return }
+
+            let msg = "Агент не начал отвечать вовремя. Возможно, упёрлись в лимит/квоту. Подробности: ~/Library/Logs/PiChat/agent-errors.log"
+            self.logAgentError(msg, context: "response_timeout")
+            self.addSystemMessage("⚠️ \(msg)")
+            self.show(notification: AppNotification(message: "Агент молчит слишком долго — проверьте лимиты и лог ошибок", type: .warning))
+            self.isWaitingForResponse = false
+        }
+    }
+
     // MARK: - Actions
 
     func sendMessage() async {
@@ -471,16 +508,21 @@ class AppState: ObservableObject {
         inputText = ""
         attachedFiles = []
         isWaitingForResponse = true
+        startResponseWatchdog()
 
         do {
             try await rpc.prompt(text, images: images)
         } catch {
+            responseWatchdogTask?.cancel()
             isWaitingForResponse = false
+            logAgentError(error.localizedDescription, context: "prompt_send")
             addSystemMessage("❌ \(error.localizedDescription)")
         }
     }
 
     func abortCurrentOperation() async {
+        responseWatchdogTask?.cancel()
+        isWaitingForResponse = false
         try? await rpc.abort()
     }
 

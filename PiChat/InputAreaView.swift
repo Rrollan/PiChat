@@ -46,36 +46,37 @@ struct InputAreaView: View {
                     .foregroundStyle(DS.Colors.textPrimary)
                     .focused($isFocused)
                     .lineLimit(1...10)
-                    .frame(minHeight: 36)
-                    .padding(.horizontal, DS.Spacing.sm)
-                    .padding(.vertical, 4)
-                    .background(
-                        RoundedRectangle(cornerRadius: DS.Radius.lg)
-                            .fill(DS.Colors.surfaceElevated)
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: DS.Radius.lg)
-                            .stroke(
-                                isFocused ? AnyShapeStyle(DS.Gradients.accentLinear) : AnyShapeStyle(DS.Colors.border),
-                                lineWidth: isFocused ? 1.5 : 1
-                            )
-                    )
-                    .shadow(color: isFocused ? DS.Colors.accent.opacity(0.15) : .clear, radius: 8, x: 0, y: 0)
-                    .animation(.spring(response: 0.3, dampingFraction: 0.8), value: isFocused)
-                    .onDrop(of: [UTType.fileURL, UTType.image], isTargeted: $isDropTargeted) { providers in
-                        handleDrop(providers: providers)
-                        return true
-                    }
-                    .overlay(
-                        RoundedRectangle(cornerRadius: DS.Radius.lg)
-                            .stroke(DS.Colors.accent.opacity(0.5), lineWidth: 2)
-                            .opacity(isDropTargeted ? 1 : 0)
-                            .animation(.easeInOut(duration: 0.15), value: isDropTargeted)
-                    )
+                    .frame(minHeight: 30)
+                    .padding(.vertical, 2)
 
                     // Send / Abort button
                     SendAbortButton()
                 }
+                .padding(.horizontal, DS.Spacing.sm)
+                .padding(.vertical, 6)
+                .background(
+                    RoundedRectangle(cornerRadius: DS.Radius.lg)
+                        .fill(DS.Colors.surfaceElevated)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: DS.Radius.lg)
+                        .stroke(
+                            isFocused ? AnyShapeStyle(DS.Gradients.accentLinear) : AnyShapeStyle(DS.Colors.border),
+                            lineWidth: isFocused ? 1.5 : 1
+                        )
+                )
+                .shadow(color: isFocused ? DS.Colors.accent.opacity(0.15) : .clear, radius: 8, x: 0, y: 0)
+                .animation(.spring(response: 0.3, dampingFraction: 0.8), value: isFocused)
+                .onDrop(of: [UTType.fileURL, UTType.image], isTargeted: $isDropTargeted) { providers in
+                    handleDrop(providers: providers)
+                    return true
+                }
+                .overlay(
+                    RoundedRectangle(cornerRadius: DS.Radius.lg)
+                        .stroke(DS.Colors.accent.opacity(0.5), lineWidth: 2)
+                        .opacity(isDropTargeted ? 1 : 0)
+                        .animation(.easeInOut(duration: 0.15), value: isDropTargeted)
+                )
                 .padding(.horizontal, DS.Spacing.xl)
             }
             .padding(.vertical, DS.Spacing.md)
@@ -136,14 +137,14 @@ struct FileAttachButton: View {
     var body: some View {
         Button(action: action) { 
             Image(systemName: "paperclip")
-                .font(.system(size: 15, weight: .medium))
+                .font(.system(size: 14, weight: .medium))
                 .foregroundStyle(isHovered ? DS.Colors.accent : DS.Colors.textTertiary)
-                .frame(width: 34, height: 34)
-                .background(isHovered ? DS.Colors.accentDim : DS.Colors.surfaceElevated)
+                .frame(width: 30, height: 30)
+                .background(isHovered ? DS.Colors.accentDim : Color.clear)
                 .clipShape(RoundedRectangle(cornerRadius: DS.Radius.sm))
                 .overlay(
                     RoundedRectangle(cornerRadius: DS.Radius.sm)
-                        .stroke(isHovered ? DS.Colors.accent.opacity(0.4) : DS.Colors.border, lineWidth: 0.5)
+                        .stroke(isHovered ? DS.Colors.accent.opacity(0.4) : DS.Colors.border.opacity(0.6), lineWidth: 0.5)
                 )
         }
         .buttonStyle(.plain)
@@ -176,7 +177,7 @@ struct SendAbortButton: View {
                     // Loading spinner
                     RoundedRectangle(cornerRadius: DS.Radius.sm)
                         .fill(DS.Colors.border)
-                        .frame(width: 34, height: 34)
+                        .frame(width: 30, height: 30)
                     ProgressView()
                         .controlSize(.small)
                         .colorScheme(.dark)
@@ -184,18 +185,18 @@ struct SendAbortButton: View {
                     // Stop button
                     RoundedRectangle(cornerRadius: DS.Radius.sm)
                         .fill(DS.Colors.red.opacity(0.9))
-                        .frame(width: 34, height: 34)
+                        .frame(width: 30, height: 30)
                     Image(systemName: "stop.fill")
-                        .font(.system(size: 11, weight: .bold))
+                        .font(.system(size: 10, weight: .bold))
                         .foregroundStyle(.white)
                 } else {
                     // Send button
                     RoundedRectangle(cornerRadius: DS.Radius.sm)
                         .fill(canSend ? AnyShapeStyle(DS.Gradients.accentLinear) : AnyShapeStyle(DS.Colors.border))
-                        .frame(width: 34, height: 34)
+                        .frame(width: 30, height: 30)
                         .shadow(color: canSend ? DS.Colors.accent.opacity(0.3) : .clear, radius: 8)
                     Image(systemName: "arrow.up")
-                        .font(.system(size: 13, weight: .bold))
+                        .font(.system(size: 12, weight: .bold))
                         .foregroundStyle(canSend ? .white : DS.Colors.textTertiary)
                 }
             }
