@@ -1,0 +1,27 @@
+name: macOS Build
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build DMG
+        run: |
+          chmod +x scripts/*.sh
+          ./scripts/build-dmg.sh
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: PiChat-macOS
+          path: |
+            build/PiChat.app
+            build/PiChat-macOS.dmg

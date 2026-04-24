@@ -8,7 +8,11 @@ let package = Package(
         .executableTarget(
             name: "PiChat",
             path: "PiChat",
-            exclude: ["Info.plist", "Assets.xcassets"],
+            exclude: ["Info.plist"],
+            resources: [
+                .process("Assets.xcassets"),
+                .process("Resources")
+            ],
             swiftSettings: [
                 .unsafeFlags(["-framework", "AppKit"])
             ]

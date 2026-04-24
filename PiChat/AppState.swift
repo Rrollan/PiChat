@@ -58,6 +58,10 @@ class AppState: ObservableObject {
     @Published var currentModel: AgentModel?
     @Published var availableModels: [AgentModel] = []
     @Published var thinkingLevel: String = "off"
+    @Published var steeringMode: String = "one-at-a-time"
+    @Published var followUpMode: String = "one-at-a-time"
+    @Published var autoCompactionEnabled: Bool = true
+    @Published var autoRetryEnabled: Bool = true
     @Published var sessionFile: String?
     @Published var sessionId: String?
     @Published var sessionName: String?
@@ -94,6 +98,86 @@ class AppState: ObservableObject {
     @Published var inputText: String = ""
     @Published var attachedFiles: [FileAttachment] = []
 
+    // MARK: Pi Runtime & Config
+    @Published var piPath: String
+    @Published var startupDirectory: String
+    @Published var piConfigDirectory: String
+    @Published var settingsJSONText: String = "{}"
+    @Published var modelsJSONText: String = "{}"
+    @Published var authJSONText: String = "{}"
+    @Published var authEntries: [PiAuthEntry] = []
+    @Published var mcpServers: [MCPServerEntry] = []
+
+    // MARK: settings.json (full)
+    @Published var sDefaultProvider = ""
+    @Published var sDefaultModel = ""
+    @Published var sDefaultThinkingLevel = "off"
+    @Published var sHideThinkingBlock = false
+    @Published var sThinkingMinimal = "1024"
+    @Published var sThinkingLow = "4096"
+    @Published var sThinkingMedium = "10240"
+    @Published var sThinkingHigh = "32768"
+    @Published var sTheme = "dark"
+    @Published var sQuietStartup = false
+    @Published var sCollapseChangelog = false
+    @Published var sEnableInstallTelemetry = true
+    @Published var sDoubleEscapeAction = "tree"
+    @Published var sTreeFilterMode = "default"
+    @Published var sEditorPaddingX = "0"
+    @Published var sAutocompleteMaxVisible = "5"
+    @Published var sShowHardwareCursor = false
+    @Published var sCompactionEnabled = true
+    @Published var sCompactionReserveTokens = "16384"
+    @Published var sCompactionKeepRecentTokens = "20000"
+    @Published var sBranchSummaryReserveTokens = "16384"
+    @Published var sBranchSummarySkipPrompt = false
+    @Published var sRetryEnabled = true
+    @Published var sRetryMaxRetries = "3"
+    @Published var sRetryBaseDelayMs = "2000"
+    @Published var sRetryMaxDelayMs = "60000"
+    @Published var sSteeringMode = "one-at-a-time"
+    @Published var sFollowUpMode = "one-at-a-time"
+    @Published var sTransport = "sse"
+    @Published var sTerminalShowImages = true
+    @Published var sTerminalImageWidthCells = "60"
+    @Published var sTerminalClearOnShrink = false
+    @Published var sImagesAutoResize = true
+    @Published var sImagesBlockImages = false
+    @Published var sShellPath = ""
+    @Published var sShellCommandPrefix = ""
+    @Published var sNpmCommand = ""
+    @Published var sSessionDir = ""
+    @Published var sEnabledModels = ""
+    @Published var sMarkdownCodeBlockIndent = "  "
+    @Published var sPackages = ""
+    @Published var sExtensions = ""
+    @Published var sSkills = ""
+    @Published var sPrompts = ""
+    @Published var sThemes = ""
+    @Published var sEnableSkillCommands = true
+
+    // MARK: CLI launch options (rpc)
+    @Published var cliNoSession = true
+    @Published var cliProvider = ""
+    @Published var cliModel = ""
+    @Published var cliApiKey = ""
+    @Published var cliThinking = ""
+    @Published var cliModels = ""
+    @Published var cliSessionDir = ""
+    @Published var cliSession = ""
+    @Published var cliFork = ""
+    @Published var cliTools = ""
+    @Published var cliNoTools = false
+    @Published var cliNoExtensions = false
+    @Published var cliNoSkills = false
+    @Published var cliNoPromptTemplates = false
+    @Published var cliNoThemes = false
+    @Published var cliNoContextFiles = false
+    @Published var cliVerbose = false
+    @Published var cliSystemPrompt = ""
+    @Published var cliAppendSystemPrompt = ""
+    @Published var cliExtraArgs = ""
+
     // MARK: Compaction
     @Published var isCompacting = false
     @Published var lastCompactionSummary: String?
@@ -103,12 +187,40 @@ class AppState: ObservableObject {
     @Published var retryMessage: String?
 
     let rpc = PiRPCClient()
+    private var configManager: PiConfigManager {
+        PiConfigManager(configDir: piConfigDirectory)
+    }
     private var cancellables = Set<AnyCancellable>()
     private var currentAssistantMessageIndex: Int?
     private var activeToolCallMap: [String: Int] = [:] // toolCallId -> index in activeTools
 
     init() {
+        let defaults = UserDefaults.standard
+        self.piPath = defaults.string(forKey: "pi.runtime.path") ?? "pi"
+        self.startupDirectory = defaults.string(forKey: "pi.runtime.startupDirectory") ?? NSHomeDirectory()
+        self.piConfigDirectory = defaults.string(forKey: "pi.runtime.configDirectory") ?? PiConfigManager.defaultConfigDir()
+        self.cliNoSession = defaults.object(forKey: "pi.cli.noSession") as? Bool ?? true
+        self.cliProvider = defaults.string(forKey: "pi.cli.provider") ?? ""
+        self.cliModel = defaults.string(forKey: "pi.cli.model") ?? ""
+        self.cliApiKey = defaults.string(forKey: "pi.cli.apiKey") ?? ""
+        self.cliThinking = defaults.string(forKey: "pi.cli.thinking") ?? ""
+        self.cliModels = defaults.string(forKey: "pi.cli.models") ?? ""
+        self.cliSessionDir = defaults.string(forKey: "pi.cli.sessionDir") ?? ""
+        self.cliSession = defaults.string(forKey: "pi.cli.session") ?? ""
+        self.cliFork = defaults.string(forKey: "pi.cli.fork") ?? ""
+        self.cliTools = defaults.string(forKey: "pi.cli.tools") ?? ""
+        self.cliNoTools = defaults.bool(forKey: "pi.cli.noTools")
+        self.cliNoExtensions = defaults.bool(forKey: "pi.cli.noExtensions")
+        self.cliNoSkills = defaults.bool(forKey: "pi.cli.noSkills")
+        self.cliNoPromptTemplates = defaults.bool(forKey: "pi.cli.noPromptTemplates")
+        self.cliNoThemes = defaults.bool(forKey: "pi.cli.noThemes")
+        self.cliNoContextFiles = defaults.bool(forKey: "pi.cli.noContextFiles")
+        self.cliVerbose = defaults.bool(forKey: "pi.cli.verbose")
+        self.cliSystemPrompt = defaults.string(forKey: "pi.cli.systemPrompt") ?? ""
+        self.cliAppendSystemPrompt = defaults.string(forKey: "pi.cli.appendSystemPrompt") ?? ""
+        self.cliExtraArgs = defaults.string(forKey: "pi.cli.extraArgs") ?? ""
         setupEventHandling()
+        loadConfigFiles()
     }
 
     // MARK: - Setup
@@ -124,11 +236,20 @@ class AppState: ObservableObject {
 
     // MARK: - Connect / Disconnect
 
-    func connect(piPath: String = "/opt/homebrew/bin/pi", workingDirectory: String = NSHomeDirectory()) async {
+    func connect(piPath: String? = nil, workingDirectory: String? = nil) async {
         isStarting = true
         connectionError = nil
-        rpc.piPath = piPath
-        rpc.workingDirectory = workingDirectory
+        let resolvedPiPath = (piPath ?? self.piPath).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "pi" : (piPath ?? self.piPath)
+        let candidateDirectory = workingDirectory ?? self.startupDirectory
+        let resolvedWorkingDirectory = candidateDirectory.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? NSHomeDirectory() : candidateDirectory
+        self.piPath = resolvedPiPath
+        self.startupDirectory = resolvedWorkingDirectory
+        persistRuntimeSettings()
+
+        rpc.piPath = resolvedPiPath
+        rpc.workingDirectory = resolvedWorkingDirectory
+        rpc.launchArguments = buildRpcLaunchArguments()
+        rpc.enableDebugLogging = cliVerbose
 
         do {
             try await rpc.start()
@@ -151,6 +272,8 @@ class AppState: ObservableObject {
 
     func changeProject(newDirectory: String) async {
         disconnect()
+        startupDirectory = newDirectory
+        persistRuntimeSettings()
         await connect(piPath: rpc.piPath, workingDirectory: newDirectory)
     }
 
@@ -164,7 +287,7 @@ class AppState: ObservableObject {
         if let s {
             applyState(s)
         }
-        availableModels = m ?? []
+        availableModels = m
         commands = c
     }
 
@@ -176,6 +299,9 @@ class AppState: ObservableObject {
         sessionName = data.sessionName
         isStreaming = data.isStreaming ?? false
         isCompacting = data.isCompacting ?? false
+        steeringMode = data.steeringMode ?? steeringMode
+        followUpMode = data.followUpMode ?? followUpMode
+        autoCompactionEnabled = data.autoCompactionEnabled ?? autoCompactionEnabled
     }
 
     // MARK: - Event Handling
@@ -309,6 +435,9 @@ class AppState: ObservableObject {
                 // refresh state
                 Task { if let s = try? await rpc.getState() { applyState(s) } }
             }
+            if command == "set_steering_mode" || command == "set_follow_up_mode" || command == "set_auto_compaction" || command == "set_auto_retry" {
+                Task { if let s = try? await rpc.getState() { applyState(s) } }
+            }
 
         default: break
         }
@@ -324,7 +453,7 @@ class AppState: ObservableObject {
         let text = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty || !attachedFiles.isEmpty else { return }
 
-        var userMsg = ChatMessage(role: .user, text: text, attachments: attachedFiles)
+        let userMsg = ChatMessage(role: .user, text: text, attachments: attachedFiles)
         messages.append(userMsg)
 
         let images: [RPCImage] = attachedFiles.compactMap { att in
@@ -382,6 +511,423 @@ class AppState: ObservableObject {
     func setThinkingLevel(_ level: String) async {
         try? await rpc.setThinkingLevel(level)
         thinkingLevel = level
+    }
+
+    func setSteeringMode(_ mode: String) async {
+        do {
+            try await rpc.setSteeringMode(mode)
+            steeringMode = mode
+        } catch {
+            show(notification: AppNotification(message: "Не удалось применить steering mode: \(error.localizedDescription)", type: .error))
+        }
+    }
+
+    func setFollowUpMode(_ mode: String) async {
+        do {
+            try await rpc.setFollowUpMode(mode)
+            followUpMode = mode
+        } catch {
+            show(notification: AppNotification(message: "Не удалось применить follow-up mode: \(error.localizedDescription)", type: .error))
+        }
+    }
+
+    func setAutoCompaction(_ enabled: Bool) async {
+        do {
+            try await rpc.setAutoCompaction(enabled: enabled)
+            autoCompactionEnabled = enabled
+        } catch {
+            show(notification: AppNotification(message: "Не удалось изменить auto-compaction: \(error.localizedDescription)", type: .error))
+        }
+    }
+
+    func setAutoRetry(_ enabled: Bool) async {
+        do {
+            try await rpc.setAutoRetry(enabled: enabled)
+            autoRetryEnabled = enabled
+        } catch {
+            show(notification: AppNotification(message: "Не удалось изменить auto-retry: \(error.localizedDescription)", type: .error))
+        }
+    }
+
+    func applyCustomModel(provider: String, modelId: String) async {
+        let trimmedProvider = provider.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedModelId = modelId.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedProvider.isEmpty, !trimmedModelId.isEmpty else {
+            show(notification: AppNotification(message: "Provider и Model ID обязательны", type: .warning))
+            return
+        }
+
+        do {
+            try await rpc.setModel(provider: trimmedProvider, modelId: trimmedModelId)
+
+            if let existing = availableModels.first(where: { $0.id == trimmedModelId && $0.provider == trimmedProvider }) {
+                currentModel = existing
+            } else {
+                let custom = AgentModel(
+                    id: trimmedModelId,
+                    name: trimmedModelId,
+                    provider: trimmedProvider,
+                    api: nil,
+                    contextWindow: nil,
+                    maxTokens: nil,
+                    reasoning: nil,
+                    cost: nil
+                )
+                availableModels.insert(custom, at: 0)
+                currentModel = custom
+            }
+
+            show(notification: AppNotification(message: "Модель применена: \(trimmedProvider)/\(trimmedModelId)", type: .success))
+        } catch {
+            show(notification: AppNotification(message: "Не удалось применить модель: \(error.localizedDescription)", type: .error))
+        }
+    }
+
+    func reconnect() async {
+        disconnect()
+        await connect(piPath: piPath, workingDirectory: startupDirectory)
+    }
+
+    func persistRuntimeSettings() {
+        let defaults = UserDefaults.standard
+        defaults.set(piPath, forKey: "pi.runtime.path")
+        defaults.set(startupDirectory, forKey: "pi.runtime.startupDirectory")
+        defaults.set(piConfigDirectory, forKey: "pi.runtime.configDirectory")
+
+        defaults.set(cliNoSession, forKey: "pi.cli.noSession")
+        defaults.set(cliProvider, forKey: "pi.cli.provider")
+        defaults.set(cliModel, forKey: "pi.cli.model")
+        defaults.set(cliApiKey, forKey: "pi.cli.apiKey")
+        defaults.set(cliThinking, forKey: "pi.cli.thinking")
+        defaults.set(cliModels, forKey: "pi.cli.models")
+        defaults.set(cliSessionDir, forKey: "pi.cli.sessionDir")
+        defaults.set(cliSession, forKey: "pi.cli.session")
+        defaults.set(cliFork, forKey: "pi.cli.fork")
+        defaults.set(cliTools, forKey: "pi.cli.tools")
+        defaults.set(cliNoTools, forKey: "pi.cli.noTools")
+        defaults.set(cliNoExtensions, forKey: "pi.cli.noExtensions")
+        defaults.set(cliNoSkills, forKey: "pi.cli.noSkills")
+        defaults.set(cliNoPromptTemplates, forKey: "pi.cli.noPromptTemplates")
+        defaults.set(cliNoThemes, forKey: "pi.cli.noThemes")
+        defaults.set(cliNoContextFiles, forKey: "pi.cli.noContextFiles")
+        defaults.set(cliVerbose, forKey: "pi.cli.verbose")
+        defaults.set(cliSystemPrompt, forKey: "pi.cli.systemPrompt")
+        defaults.set(cliAppendSystemPrompt, forKey: "pi.cli.appendSystemPrompt")
+        defaults.set(cliExtraArgs, forKey: "pi.cli.extraArgs")
+    }
+
+    func buildRpcLaunchArguments() -> [String] {
+        var args: [String] = []
+
+        if cliNoSession { args.append("--no-session") }
+        if !cliProvider.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            args += ["--provider", cliProvider.trimmingCharacters(in: .whitespacesAndNewlines)]
+        }
+        if !cliModel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            args += ["--model", cliModel.trimmingCharacters(in: .whitespacesAndNewlines)]
+        }
+        if !cliApiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            args += ["--api-key", cliApiKey.trimmingCharacters(in: .whitespacesAndNewlines)]
+        }
+        if !cliThinking.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            args += ["--thinking", cliThinking.trimmingCharacters(in: .whitespacesAndNewlines)]
+        }
+        if !cliModels.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            args += ["--models", cliModels.trimmingCharacters(in: .whitespacesAndNewlines)]
+        }
+        if !cliSessionDir.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            args += ["--session-dir", cliSessionDir.trimmingCharacters(in: .whitespacesAndNewlines)]
+        }
+        if !cliSession.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            args += ["--session", cliSession.trimmingCharacters(in: .whitespacesAndNewlines)]
+        }
+        if !cliFork.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            args += ["--fork", cliFork.trimmingCharacters(in: .whitespacesAndNewlines)]
+        }
+        if !cliTools.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            args += ["--tools", cliTools.trimmingCharacters(in: .whitespacesAndNewlines)]
+        }
+
+        if cliNoTools { args.append("--no-tools") }
+        if cliNoExtensions { args.append("--no-extensions") }
+        if cliNoSkills { args.append("--no-skills") }
+        if cliNoPromptTemplates { args.append("--no-prompt-templates") }
+        if cliNoThemes { args.append("--no-themes") }
+        if cliNoContextFiles { args.append("--no-context-files") }
+        if cliVerbose { args.append("--verbose") }
+
+        if !cliSystemPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            args += ["--system-prompt", cliSystemPrompt]
+        }
+        if !cliAppendSystemPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            args += ["--append-system-prompt", cliAppendSystemPrompt]
+        }
+
+        let extra = cliExtraArgs
+            .split(separator: " ")
+            .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        args += extra
+
+        return args
+    }
+
+    func applySettingsFormToJSON() {
+        var root: [String: Any] = [:]
+
+        root["defaultProvider"] = sDefaultProvider
+        root["defaultModel"] = sDefaultModel
+        root["defaultThinkingLevel"] = sDefaultThinkingLevel
+        root["hideThinkingBlock"] = sHideThinkingBlock
+        root["thinkingBudgets"] = [
+            "minimal": Int(sThinkingMinimal) ?? 1024,
+            "low": Int(sThinkingLow) ?? 4096,
+            "medium": Int(sThinkingMedium) ?? 10240,
+            "high": Int(sThinkingHigh) ?? 32768
+        ]
+        root["theme"] = sTheme
+        root["quietStartup"] = sQuietStartup
+        root["collapseChangelog"] = sCollapseChangelog
+        root["enableInstallTelemetry"] = sEnableInstallTelemetry
+        root["doubleEscapeAction"] = sDoubleEscapeAction
+        root["treeFilterMode"] = sTreeFilterMode
+        root["editorPaddingX"] = Int(sEditorPaddingX) ?? 0
+        root["autocompleteMaxVisible"] = Int(sAutocompleteMaxVisible) ?? 5
+        root["showHardwareCursor"] = sShowHardwareCursor
+
+        root["compaction"] = [
+            "enabled": sCompactionEnabled,
+            "reserveTokens": Int(sCompactionReserveTokens) ?? 16384,
+            "keepRecentTokens": Int(sCompactionKeepRecentTokens) ?? 20000
+        ]
+        root["branchSummary"] = [
+            "reserveTokens": Int(sBranchSummaryReserveTokens) ?? 16384,
+            "skipPrompt": sBranchSummarySkipPrompt
+        ]
+        root["retry"] = [
+            "enabled": sRetryEnabled,
+            "maxRetries": Int(sRetryMaxRetries) ?? 3,
+            "baseDelayMs": Int(sRetryBaseDelayMs) ?? 2000,
+            "maxDelayMs": Int(sRetryMaxDelayMs) ?? 60000
+        ]
+
+        root["steeringMode"] = sSteeringMode
+        root["followUpMode"] = sFollowUpMode
+        root["transport"] = sTransport
+
+        root["terminal"] = [
+            "showImages": sTerminalShowImages,
+            "imageWidthCells": Int(sTerminalImageWidthCells) ?? 60,
+            "clearOnShrink": sTerminalClearOnShrink
+        ]
+        root["images"] = [
+            "autoResize": sImagesAutoResize,
+            "blockImages": sImagesBlockImages
+        ]
+
+        root["shellPath"] = sShellPath
+        root["shellCommandPrefix"] = sShellCommandPrefix
+        root["npmCommand"] = csvToArray(sNpmCommand)
+        root["sessionDir"] = sSessionDir
+        root["enabledModels"] = csvToArray(sEnabledModels)
+        root["markdown"] = ["codeBlockIndent": sMarkdownCodeBlockIndent]
+
+        root["packages"] = csvToArray(sPackages)
+        root["extensions"] = csvToArray(sExtensions)
+        root["skills"] = csvToArray(sSkills)
+        root["prompts"] = csvToArray(sPrompts)
+        root["themes"] = csvToArray(sThemes)
+        root["enableSkillCommands"] = sEnableSkillCommands
+
+        settingsJSONText = configManager.prettyPrinted(root)
+    }
+
+    func applySettingsFormFromJSON() {
+        guard let settingsData = settingsJSONText.data(using: .utf8),
+              let json = try? JSONSerialization.jsonObject(with: settingsData) as? [String: Any] else {
+            return
+        }
+
+        sDefaultProvider = json["defaultProvider"] as? String ?? ""
+        sDefaultModel = json["defaultModel"] as? String ?? ""
+        sDefaultThinkingLevel = json["defaultThinkingLevel"] as? String ?? "off"
+        sHideThinkingBlock = json["hideThinkingBlock"] as? Bool ?? false
+
+        let budgets = json["thinkingBudgets"] as? [String: Any] ?? [:]
+        sThinkingMinimal = "\(budgets["minimal"] as? Int ?? 1024)"
+        sThinkingLow = "\(budgets["low"] as? Int ?? 4096)"
+        sThinkingMedium = "\(budgets["medium"] as? Int ?? 10240)"
+        sThinkingHigh = "\(budgets["high"] as? Int ?? 32768)"
+
+        sTheme = json["theme"] as? String ?? "dark"
+        sQuietStartup = json["quietStartup"] as? Bool ?? false
+        sCollapseChangelog = json["collapseChangelog"] as? Bool ?? false
+        sEnableInstallTelemetry = json["enableInstallTelemetry"] as? Bool ?? true
+        sDoubleEscapeAction = json["doubleEscapeAction"] as? String ?? "tree"
+        sTreeFilterMode = json["treeFilterMode"] as? String ?? "default"
+        sEditorPaddingX = "\(json["editorPaddingX"] as? Int ?? 0)"
+        sAutocompleteMaxVisible = "\(json["autocompleteMaxVisible"] as? Int ?? 5)"
+        sShowHardwareCursor = json["showHardwareCursor"] as? Bool ?? false
+
+        let compaction = json["compaction"] as? [String: Any] ?? [:]
+        sCompactionEnabled = compaction["enabled"] as? Bool ?? true
+        sCompactionReserveTokens = "\(compaction["reserveTokens"] as? Int ?? 16384)"
+        sCompactionKeepRecentTokens = "\(compaction["keepRecentTokens"] as? Int ?? 20000)"
+
+        let branch = json["branchSummary"] as? [String: Any] ?? [:]
+        sBranchSummaryReserveTokens = "\(branch["reserveTokens"] as? Int ?? 16384)"
+        sBranchSummarySkipPrompt = branch["skipPrompt"] as? Bool ?? false
+
+        let retry = json["retry"] as? [String: Any] ?? [:]
+        sRetryEnabled = retry["enabled"] as? Bool ?? true
+        sRetryMaxRetries = "\(retry["maxRetries"] as? Int ?? 3)"
+        sRetryBaseDelayMs = "\(retry["baseDelayMs"] as? Int ?? 2000)"
+        sRetryMaxDelayMs = "\(retry["maxDelayMs"] as? Int ?? 60000)"
+
+        sSteeringMode = json["steeringMode"] as? String ?? "one-at-a-time"
+        sFollowUpMode = json["followUpMode"] as? String ?? "one-at-a-time"
+        sTransport = json["transport"] as? String ?? "sse"
+
+        let terminal = json["terminal"] as? [String: Any] ?? [:]
+        sTerminalShowImages = terminal["showImages"] as? Bool ?? true
+        sTerminalImageWidthCells = "\(terminal["imageWidthCells"] as? Int ?? 60)"
+        sTerminalClearOnShrink = terminal["clearOnShrink"] as? Bool ?? false
+
+        let images = json["images"] as? [String: Any] ?? [:]
+        sImagesAutoResize = images["autoResize"] as? Bool ?? true
+        sImagesBlockImages = images["blockImages"] as? Bool ?? false
+
+        sShellPath = json["shellPath"] as? String ?? ""
+        sShellCommandPrefix = json["shellCommandPrefix"] as? String ?? ""
+        sNpmCommand = arrayToCSV(json["npmCommand"] as? [String] ?? [])
+        sSessionDir = json["sessionDir"] as? String ?? ""
+        sEnabledModels = arrayToCSV(json["enabledModels"] as? [String] ?? [])
+
+        let markdown = json["markdown"] as? [String: Any] ?? [:]
+        sMarkdownCodeBlockIndent = markdown["codeBlockIndent"] as? String ?? "  "
+
+        sPackages = arrayToCSV(json["packages"] as? [String] ?? [])
+        sExtensions = arrayToCSV(json["extensions"] as? [String] ?? [])
+        sSkills = arrayToCSV(json["skills"] as? [String] ?? [])
+        sPrompts = arrayToCSV(json["prompts"] as? [String] ?? [])
+        sThemes = arrayToCSV(json["themes"] as? [String] ?? [])
+        sEnableSkillCommands = json["enableSkillCommands"] as? Bool ?? true
+
+        steeringMode = sSteeringMode
+        followUpMode = sFollowUpMode
+        autoCompactionEnabled = sCompactionEnabled
+        autoRetryEnabled = sRetryEnabled
+    }
+
+    private func csvToArray(_ text: String) -> [String] {
+        text
+            .split(separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+    }
+
+    private func arrayToCSV(_ value: [String]) -> String {
+        value.joined(separator: ", ")
+    }
+
+    func loadConfigFiles() {
+        settingsJSONText = configManager.readRawFile(named: "settings.json", defaultContent: "{}")
+        modelsJSONText = configManager.readRawFile(named: "models.json", defaultContent: "{\n  \"providers\": {}\n}")
+        authJSONText = configManager.readRawFile(named: "auth.json", defaultContent: "{}")
+        authEntries = configManager.loadAuthEntries()
+        mcpServers = configManager.loadMCPServers()
+
+        applySettingsFormFromJSON()
+    }
+
+    func saveSettingsJSON() {
+        do {
+            _ = try JSONSerialization.jsonObject(with: Data(settingsJSONText.utf8))
+            try configManager.writeRawFile(named: "settings.json", content: settingsJSONText)
+            applySettingsFormFromJSON()
+            show(notification: AppNotification(message: "settings.json сохранён", type: .success))
+        } catch {
+            show(notification: AppNotification(message: "Ошибка settings.json: \(error.localizedDescription)", type: .error))
+        }
+    }
+
+    func saveSettingsFromForm() {
+        applySettingsFormToJSON()
+        saveSettingsJSON()
+    }
+
+    func saveModelsJSON() {
+        do {
+            _ = try JSONSerialization.jsonObject(with: Data(modelsJSONText.utf8))
+            try configManager.writeRawFile(named: "models.json", content: modelsJSONText)
+            show(notification: AppNotification(message: "models.json сохранён", type: .success))
+            Task { await reconnect() }
+        } catch {
+            show(notification: AppNotification(message: "Ошибка models.json: \(error.localizedDescription)", type: .error))
+        }
+    }
+
+    func saveAuthJSON() {
+        do {
+            _ = try JSONSerialization.jsonObject(with: Data(authJSONText.utf8))
+            try configManager.writeRawFile(named: "auth.json", content: authJSONText)
+            authEntries = configManager.loadAuthEntries()
+            show(notification: AppNotification(message: "auth.json сохранён", type: .success))
+            Task { await reconnect() }
+        } catch {
+            show(notification: AppNotification(message: "Ошибка auth.json: \(error.localizedDescription)", type: .error))
+        }
+    }
+
+    func upsertAccount(provider: String, key: String) {
+        let p = provider.trimmingCharacters(in: .whitespacesAndNewlines)
+        let k = key.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !p.isEmpty, !k.isEmpty else {
+            show(notification: AppNotification(message: "Provider и ключ обязательны", type: .warning))
+            return
+        }
+
+        do {
+            try configManager.upsertApiKey(provider: p, key: k)
+            loadConfigFiles()
+            show(notification: AppNotification(message: "Аккаунт обновлён: \(p)", type: .success))
+        } catch {
+            show(notification: AppNotification(message: "Не удалось сохранить аккаунт: \(error.localizedDescription)", type: .error))
+        }
+    }
+
+    func removeAccount(provider: String) {
+        do {
+            try configManager.removeAuth(provider: provider)
+            loadConfigFiles()
+            show(notification: AppNotification(message: "Аккаунт удалён: \(provider)", type: .success))
+        } catch {
+            show(notification: AppNotification(message: "Не удалось удалить аккаунт: \(error.localizedDescription)", type: .error))
+        }
+    }
+
+    func addCustomProviderModel(provider: String,
+                                baseUrl: String,
+                                api: String,
+                                apiKey: String,
+                                modelId: String,
+                                modelName: String,
+                                reasoning: Bool,
+                                supportsImages: Bool) {
+        do {
+            try configManager.addCustomModel(providerId: provider,
+                                             baseUrl: baseUrl,
+                                             api: api,
+                                             apiKey: apiKey,
+                                             modelId: modelId,
+                                             modelName: modelName,
+                                             reasoning: reasoning,
+                                             supportsImages: supportsImages)
+            loadConfigFiles()
+            show(notification: AppNotification(message: "Модель добавлена: \(provider)/\(modelId)", type: .success))
+        } catch {
+            show(notification: AppNotification(message: "Не удалось добавить модель: \(error.localizedDescription)", type: .error))
+        }
     }
 
     func show(notification: AppNotification) {

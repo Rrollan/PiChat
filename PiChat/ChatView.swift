@@ -123,14 +123,17 @@ struct ChatHeaderView: View {
     }
 
     private func selectNewFolder() {
-        let panel = NSOpenPanel()
-        panel.canChooseFiles = false
-        panel.canChooseDirectories = true
-        panel.canCreateDirectories = true
-        panel.title = "Select Project Folder"
-        if panel.runModal() == .OK, let url = panel.url {
-            Task {
-                await state.changeProject(newDirectory: url.path)
+        guard let url = ScriptFilePicker.pickFolder(prompt: "Select Project Folder") else {
+            state.show(notification: AppNotification(message: "Выбор папки отменён", type: .warning))
+            return
+        }
+
+        let hasAccess = url.startAccessingSecurityScopedResource()
+        Task {
+            await state.changeProject(newDirectory: url.path)
+            state.show(notification: AppNotification(message: "Проект: \(url.lastPathComponent)", type: .success))
+            if hasAccess {
+                url.stopAccessingSecurityScopedResource()
             }
         }
     }
@@ -153,21 +156,15 @@ struct WelcomeView: View {
             Spacer(minLength: 60)
 
             // Logo
-            VStack(spacing: DS.Spacing.lg) {
-                ZStack {
-                    Circle()
-                        .fill(DS.Gradients.accentLinear)
-                        .frame(width: 64, height: 64)
-                        .blur(radius: 20)
-                        .opacity(0.5)
-                    Text("π")
-                        .font(.system(size: 42, weight: .bold, design: .rounded))
-                        .foregroundStyle(DS.Gradients.accentLinear)
-                }
+            VStack(spacing: DS.Spacing.xs) {
+                ThemedLogo()
+                    .frame(width: 240, height: 240)
+                    .opacity(0.9)
+                    .padding(.bottom, -45)
 
-                VStack(spacing: 6) {
+                VStack(spacing: 8) {
                     Text("PiChat")
-                        .font(.system(size: 28, weight: .bold, design: .rounded))
+                        .font(.system(size: 28, weight: .semibold, design: .serif))
                         .foregroundStyle(DS.Colors.textPrimary)
                     Text("Powered by \(state.currentModel?.name ?? "pi agent")")
                         .font(DS.mono(12))
@@ -298,16 +295,10 @@ struct AssistantMessageView: View {
     var body: some View {
         HStack(alignment: .top, spacing: DS.Spacing.md) {
             // Avatar
-            ZStack {
-                Circle()
-                    .fill(DS.Gradients.accentLinear)
-                    .frame(width: 28, height: 28)
-                    .shadow(color: DS.Colors.accent.opacity(0.3), radius: 6)
-                Text("π")
-                    .font(.system(size: 13, weight: .bold, design: .rounded))
-                    .foregroundStyle(.black)
-            }
-            .padding(.top, 2)
+            ThemedLogo()
+                .frame(width: 28, height: 28)
+                .opacity(0.9)
+                .padding(.top, 2)
 
             VStack(alignment: .leading, spacing: DS.Spacing.sm) {
 

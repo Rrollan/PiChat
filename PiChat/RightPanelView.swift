@@ -4,18 +4,38 @@ import SwiftUI
 
 struct RightPanelView: View {
     @EnvironmentObject var state: AppState
+    @AppStorage("ui.showRightPanel") private var showRightPanel = true
     @State private var selectedTab = 0
 
     var body: some View {
         VStack(spacing: 0) {
             // Tab bar
-            HStack(spacing: 0) {
-                ForEach(Array(["Activity", "Queue"].enumerated()), id: \.0) { i, tab in
-                    TabButton(title: tab, icon: i == 0 ? "bolt.fill" : "list.number",
-                              isSelected: selectedTab == i) {
-                        withAnimation(.spring(response: 0.25)) { selectedTab = i }
+            HStack(spacing: DS.Spacing.xs) {
+                HStack(spacing: 0) {
+                    ForEach(Array(["Activity", "Queue"].enumerated()), id: \.0) { i, tab in
+                        TabButton(title: tab, icon: i == 0 ? "bolt.fill" : "list.number",
+                                  isSelected: selectedTab == i) {
+                            withAnimation(.spring(response: 0.25)) { selectedTab = i }
+                        }
                     }
                 }
+
+                Button {
+                    withAnimation { showRightPanel = false }
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(DS.Colors.textSecondary)
+                        .frame(width: 24, height: 24)
+                        .background(DS.Colors.surface)
+                        .clipShape(RoundedRectangle(cornerRadius: DS.Radius.sm))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: DS.Radius.sm)
+                                .stroke(DS.Colors.border, lineWidth: 1)
+                        )
+                }
+                .buttonStyle(.plain)
+                .help("Close right panel")
             }
             .padding(.horizontal, DS.Spacing.sm)
             .padding(.vertical, DS.Spacing.xs)

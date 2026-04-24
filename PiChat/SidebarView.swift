@@ -4,6 +4,8 @@ import SwiftUI
 
 struct SidebarView: View {
     @EnvironmentObject var state: AppState
+    @AppStorage("ui.showSkillsSection") private var showSkillsSection = true
+    @AppStorage("ui.showMCPSection") private var showMCPSection = true
 
     var body: some View {
         VStack(spacing: 0) {
@@ -22,13 +24,23 @@ struct SidebarView: View {
 
                     Divider().background(DS.Colors.border)
 
-                    // Skills
-                    CommandsSectionView()
+                    if showSkillsSection || showMCPSection {
+                        Divider().background(DS.Colors.border)
+                    }
 
-                    Divider().background(DS.Colors.border)
+                    // Skills
+                    if showSkillsSection {
+                        CommandsSectionView()
+                    }
+
+                    if showSkillsSection && showMCPSection {
+                        Divider().background(DS.Colors.border)
+                    }
 
                     // MCP
-                    MCPSectionView()
+                    if showMCPSection {
+                        MCPSectionView()
+                    }
                 }
                 .padding(DS.Spacing.lg)
             }
@@ -52,16 +64,6 @@ struct SidebarHeaderView: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            // Logo
-            ZStack {
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(DS.Gradients.accentLinear)
-                    .frame(width: 28, height: 28)
-                Text("π")
-                    .font(.system(size: 16, weight: .bold, design: .rounded))
-                    .foregroundStyle(.black)
-            }
-
             VStack(alignment: .leading, spacing: 1) {
                 Text("PiChat")
                     .font(DS.display(14, weight: .bold))
@@ -360,24 +362,39 @@ struct CommandRow: View {
 struct MCPSectionView: View {
     @EnvironmentObject var state: AppState
 
-    // Static MCP info (from mcp.json we read earlier)
-    let mcpServers: [(name: String, description: String, icon: String, color: Color)] = [
-        ("21st-dev-magic", "Magic UI Components", "wand.and.stars", Color(hex: "#8B5CF6")),
-        ("claude-flow", "Multi-agent orchestration", "arrow.triangle.branch", Color(hex: "#F59E0B"))
-    ]
-
     var body: some View {
         VStack(alignment: .leading, spacing: DS.Spacing.sm) {
             SectionHeader(title: "MCP Servers", icon: "network",
-                          trailing: AnyView(Badge(text: "\(mcpServers.count)", color: DS.Colors.green)))
+                          trailing: AnyView(Badge(text: "\(state.mcpServers.count)", color: DS.Colors.green)))
 
-            VStack(spacing: 4) {
-                ForEach(mcpServers, id: \.name) { server in
-                    MCPServerRow(name: server.name, description: server.description,
-                                 icon: server.icon, color: server.color)
+            if state.mcpServers.isEmpty {
+                Text("No MCP servers configured")
+                    .font(DS.body(11))
+                    .foregroundStyle(DS.Colors.textTertiary)
+            } else {
+                VStack(spacing: 4) {
+                    ForEach(state.mcpServers) { server in
+                        MCPServerRow(name: server.name, description: server.description,
+                                     icon: serverIcon(name: server.name), color: serverColor(name: server.name))
+                    }
                 }
             }
         }
+    }
+
+    private func serverIcon(name: String) -> String {
+        let lowercase = name.lowercased()
+        if lowercase.contains("github") || lowercase.contains("git") { return "arrow.triangle.branch" }
+        if lowercase.contains("browser") || lowercase.contains("web") { return "globe" }
+        if lowercase.contains("memory") || lowercase.contains("vector") { return "brain" }
+        if lowercase.contains("design") || lowercase.contains("magic") { return "wand.and.stars" }
+        return "server.rack"
+    }
+
+    private func serverColor(name: String) -> Color {
+        let palette: [Color] = [DS.Colors.green, DS.Colors.purple, DS.Colors.accent, DS.Colors.yellow]
+        let index = abs(name.hashValue) % palette.count
+        return palette[index]
     }
 }
 
@@ -429,26 +446,47 @@ struct MCPServerRow: View {
 
 struct SidebarActionsView: View {
     @EnvironmentObject var state: AppState
+    @State private var showAppSettings = false
 
     var body: some View {
         HStack(spacing: DS.Spacing.sm) {
-            IconButton(icon: "plus.square", label: "New", color: DS.Colors.textSecondary, hoverColor: DS.Colors.accent) {
+            IconButton(icon: "plus.square", color: DS.Colors.textSecondary, hoverColor: DS.Colors.accent) {
                 Task { await state.startNewSession() }
             }
+            .help("New Session")
 
-            IconButton(icon: "arrow.clockwise", label: "Refresh", color: DS.Colors.textSecondary, hoverColor: DS.Colors.purple) {
+            IconButton(icon: "arrow.clockwise", color: DS.Colors.textSecondary, hoverColor: DS.Colors.purple) {
                 Task {
                     await state.refreshStats()
                     await state.refreshCommands()
                 }
             }
+            .help("Refresh")
 
-            Spacer()
+            Spacer(minLength: 0)
 
-            IconButton(icon: "archivebox", label: "Compact", color: DS.Colors.textSecondary, hoverColor: DS.Colors.yellow) {
+            Button {
+                showAppSettings = true
+            } label: {
+                Image(systemName: "gearshape")
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundStyle(DS.Colors.textSecondary)
+                    .padding(6)
+                    .background(DS.Colors.surface)
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
+            }
+            .buttonStyle(.plain)
+            .help("Settings")
+            .sheet(isPresented: $showAppSettings) {
+                AppSettingsView()
+                    .environmentObject(state)
+            }
+
+            IconButton(icon: "archivebox", color: DS.Colors.textSecondary, hoverColor: DS.Colors.yellow) {
                 Task { await state.compact() }
             }
             .disabled(state.isStreaming)
+            .help("Compact")
         }
         .padding(DS.Spacing.md)
         .background(DS.Colors.surfaceElevated)

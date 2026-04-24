@@ -3,12 +3,13 @@ import SwiftUI
 @main
 struct PiChatApp: App {
     @StateObject private var appState = AppState()
+    @AppStorage("ui.themeMode") private var themeMode = "system"
 
     var body: some Scene {
         WindowGroup {
             ContentView()
                 .environmentObject(appState)
-                .preferredColorScheme(.dark)
+                .preferredColorScheme(preferredColorScheme)
         }
         .windowStyle(.hiddenTitleBar)
         .windowToolbarStyle(.unified(showsTitle: false))
@@ -32,6 +33,14 @@ struct PiChatApp: App {
                 }
                 .disabled(!appState.isConnected)
             }
+        }
+    }
+
+    private var preferredColorScheme: ColorScheme? {
+        switch themeMode {
+        case "light": return .light
+        case "dark": return .dark
+        default: return nil
         }
     }
 }

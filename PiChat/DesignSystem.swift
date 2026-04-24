@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 // MARK: - Design System
 
@@ -6,51 +7,52 @@ enum DS {
 
     // MARK: Colors
     enum Colors {
-        static let background      = Color(hex: "#09090F")
-        static let surface         = Color(hex: "#111118")
-        static let surfaceElevated = Color(hex: "#16161F")
-        static let border          = Color(hex: "#1E1E2E")
-        static let borderAccent    = Color(hex: "#2D2D4A")
+        // Adaptive light/dark palette
+        static let background      = Color(lightHex: "#FFFFFF", darkHex: "#101114")
+        static let surface         = Color(lightHex: "#F9F9F9", darkHex: "#16181D")
+        static let surfaceElevated = Color(lightHex: "#F3F3F3", darkHex: "#1E2128")
+        static let border          = Color(lightHex: "#EAEAEA", darkHex: "#2A2F39")
+        static let borderAccent    = Color(lightHex: "#D0D0D0", darkHex: "#3A404D")
 
-        static let accent          = Color(hex: "#00D4FF")
-        static let accentDim       = Color(hex: "#00D4FF").opacity(0.15)
-        static let purple          = Color(hex: "#8B5CF6")
-        static let purpleDim       = Color(hex: "#8B5CF6").opacity(0.15)
-        static let green           = Color(hex: "#10B981")
-        static let red             = Color(hex: "#EF4444")
-        static let yellow          = Color(hex: "#F59E0B")
-        static let orange          = Color(hex: "#F97316")
+        static let accent          = Color(lightHex: "#000000", darkHex: "#F5F7FA")
+        static let accentDim       = Color(lightHex: "#000000", darkHex: "#FFFFFF").opacity(0.08)
+        static let purple          = Color(hex: "#7C66DC")
+        static let purpleDim       = Color(hex: "#7C66DC").opacity(0.15)
+        static let green           = Color(hex: "#4D8B55")
+        static let red             = Color(hex: "#C65345")
+        static let yellow          = Color(hex: "#D49A36")
+        static let orange          = Color(hex: "#D97757")
 
-        static let textPrimary     = Color(hex: "#E8E8F0")
-        static let textSecondary   = Color(hex: "#8888AA")
-        static let textTertiary    = Color(hex: "#4A4A6A")
-        static let textAccent      = Color(hex: "#00D4FF")
+        static let textPrimary     = Color(lightHex: "#111111", darkHex: "#E8ECF2")
+        static let textSecondary   = Color(lightHex: "#666666", darkHex: "#B5BCC9")
+        static let textTertiary    = Color(lightHex: "#999999", darkHex: "#8891A1")
+        static let textAccent      = accent
 
-        static let userBubble      = Color(hex: "#1A1A2E")
-        static let assistantBubble = Color(hex: "#0F0F1A")
-        static let toolBubble      = Color(hex: "#0D1A12")
+        static let userBubble      = Color(lightHex: "#F3F3F3", darkHex: "#20242C")
+        static let assistantBubble = Color(lightHex: "#FFFFFF", darkHex: "#151922")
+        static let toolBubble      = Color(lightHex: "#F9F9F9", darkHex: "#181C24")
 
-        // Glow
-        static let glowBlue    = Color(hex: "#00D4FF").opacity(0.08)
-        static let glowPurple  = Color(hex: "#8B5CF6").opacity(0.06)
+        // Glow (soft shadow colors)
+        static let glowBlue    = Color(lightHex: "#000000", darkHex: "#4C7DFF").opacity(0.12)
+        static let glowPurple  = Color(lightHex: "#000000", darkHex: "#7C66DC").opacity(0.12)
     }
 
     // MARK: Gradients
     enum Gradients {
         static let accentLinear = LinearGradient(
-            colors: [Color(hex: "#00D4FF"), Color(hex: "#8B5CF6")],
+            colors: [Color(hex: "#333333"), Color(hex: "#000000")],
             startPoint: .leading, endPoint: .trailing
         )
         static let backgroundRadial = RadialGradient(
-            colors: [Color(hex: "#0D0D1A"), Color(hex: "#09090F")],
+            colors: [Color(hex: "#FFFFFF"), Color(hex: "#F9F9F9")],
             center: .top, startRadius: 0, endRadius: 600
         )
         static let glowTop = LinearGradient(
-            colors: [Color(hex: "#00D4FF").opacity(0.05), .clear],
+            colors: [Color.black.opacity(0.02), .clear],
             startPoint: .top, endPoint: .bottom
         )
         static let userBubble = LinearGradient(
-            colors: [Color(hex: "#1A1A35"), Color(hex: "#141428")],
+            colors: [Color(hex: "#F3F3F3"), Color(hex: "#F3F3F3")],
             startPoint: .topLeading, endPoint: .bottomTrailing
         )
     }
@@ -97,6 +99,27 @@ extension Color {
         let g = Double((rgb >> 8)  & 0xFF) / 255
         let b = Double(rgb         & 0xFF) / 255
         self.init(red: r, green: g, blue: b)
+    }
+
+    init(lightHex: String, darkHex: String) {
+        self.init(nsColor: NSColor(name: nil) { appearance in
+            let best = appearance.bestMatch(from: [.darkAqua, .aqua])
+            return NSColor(hex: best == .darkAqua ? darkHex : lightHex)
+        })
+    }
+}
+
+extension NSColor {
+    convenience init(hex: String) {
+        let h = hex.trimmingCharacters(in: .init(charactersIn: "#"))
+        var rgb: UInt64 = 0
+        Scanner(string: h).scanHexInt64(&rgb)
+        self.init(
+            calibratedRed: CGFloat((rgb >> 16) & 0xFF) / 255,
+            green: CGFloat((rgb >> 8) & 0xFF) / 255,
+            blue: CGFloat(rgb & 0xFF) / 255,
+            alpha: 1
+        )
     }
 }
 

@@ -30,46 +30,38 @@ struct InputAreaView: View {
                 // Input row
                 HStack(alignment: .bottom, spacing: DS.Spacing.sm) {
                     // File attach button
-                    FileAttachButton()
+                    FileAttachButton {
+                        openFileImporter()
+                    }
 
                     // Text input
-                    ZStack(alignment: .topLeading) {
-                        if state.inputText.isEmpty {
-                            Text("Message pi agent…  (⌘↵ to send)")
-                                .font(DS.body(14))
-                                .foregroundStyle(DS.Colors.textTertiary)
-                                .padding(.top, 8)
-                                .padding(.leading, 4)
-                                .allowsHitTesting(false)
-                        }
-
-                        TextEditor(text: $state.inputText)
-                            .font(DS.body(14))
-                            .foregroundStyle(DS.Colors.textPrimary)
-                            .scrollContentBackground(.hidden)
-                            .background(.clear)
-                            .focused($isFocused)
-                            .frame(minHeight: 36, maxHeight: 180)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .onKeyPress(.return) {
-                                // Cmd+Return to send
-                                return .ignored
-                            }
-                    }
+                    TextField(
+                        "",
+                        text: $state.inputText,
+                        prompt: Text("Message pi agent…  (⌘↵ to send)").foregroundColor(DS.Colors.textTertiary),
+                        axis: .vertical
+                    )
+                    .textFieldStyle(.plain)
+                    .font(DS.body(14))
+                    .foregroundStyle(DS.Colors.textPrimary)
+                    .focused($isFocused)
+                    .lineLimit(1...10)
+                    .frame(minHeight: 36)
                     .padding(.horizontal, DS.Spacing.sm)
-                    .padding(.vertical, DS.Spacing.sm)
+                    .padding(.vertical, 4)
                     .background(
                         RoundedRectangle(cornerRadius: DS.Radius.lg)
-                            .fill(DS.Colors.surface)
-                            .overlay(
-                                RoundedRectangle(cornerRadius: DS.Radius.lg)
-                                    .stroke(
-                                        isFocused ? DS.Colors.accent.opacity(0.5) : DS.Colors.border,
-                                        lineWidth: 1
-                                    )
+                            .fill(DS.Colors.surfaceElevated)
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: DS.Radius.lg)
+                            .stroke(
+                                isFocused ? AnyShapeStyle(DS.Gradients.accentLinear) : AnyShapeStyle(DS.Colors.border),
+                                lineWidth: isFocused ? 1.5 : 1
                             )
                     )
-                    .animation(.easeInOut(duration: 0.15), value: isFocused)
+                    .shadow(color: isFocused ? DS.Colors.accent.opacity(0.15) : .clear, radius: 8, x: 0, y: 0)
+                    .animation(.spring(response: 0.3, dampingFraction: 0.8), value: isFocused)
                     .onDrop(of: [UTType.fileURL, UTType.image], isTargeted: $isDropTargeted) { providers in
                         handleDrop(providers: providers)
                         return true
@@ -90,6 +82,21 @@ struct InputAreaView: View {
             .background(DS.Colors.surface)
         }
         .onAppear { isFocused = true }
+    }
+
+    private func openFileImporter() {
+        let urls = ScriptFilePicker.pickFiles(prompt: "Attach Files")
+        if urls.isEmpty {
+            state.show(notification: AppNotification(message: "Выбор файлов отменён", type: .warning))
+            return
+        }
+
+        for url in urls {
+            let hasAccess = url.startAccessingSecurityScopedResource()
+            state.addFile(url: url)
+            if hasAccess { url.stopAccessingSecurityScopedResource() }
+        }
+        state.show(notification: AppNotification(message: "Добавлено файлов: \(urls.count)", type: .success))
     }
 
     private func handleDrop(providers: [NSItemProvider]) {
@@ -123,13 +130,11 @@ struct InputAreaView: View {
 // MARK: - File Attach Button
 
 struct FileAttachButton: View {
-    @EnvironmentObject var state: AppState
+    let action: () -> Void
     @State private var isHovered = false
 
     var body: some View {
-        Button {
-            openFilePanel()
-        } label: {
+        Button(action: action) { 
             Image(systemName: "paperclip")
                 .font(.system(size: 15, weight: .medium))
                 .foregroundStyle(isHovered ? DS.Colors.accent : DS.Colors.textTertiary)
@@ -145,20 +150,6 @@ struct FileAttachButton: View {
         .onHover { isHovered = $0 }
         .animation(.easeInOut(duration: 0.12), value: isHovered)
         .help("Attach files (or drag & drop)")
-    }
-
-    private func openFilePanel() {
-        let panel = NSOpenPanel()
-        panel.allowsMultipleSelection = true
-        panel.canChooseDirectories = false
-        panel.allowedContentTypes = [
-            .image, .pdf, .plainText, .sourceCode, .json,
-            .init(filenameExtension: "md")!, .init(filenameExtension: "ts")!,
-            .init(filenameExtension: "swift")!, .init(filenameExtension: "py")!
-        ]
-        if panel.runModal() == .OK {
-            panel.urls.forEach { state.addFile(url: $0) }
-        }
     }
 }
 
@@ -205,7 +196,7 @@ struct SendAbortButton: View {
                         .shadow(color: canSend ? DS.Colors.accent.opacity(0.3) : .clear, radius: 8)
                     Image(systemName: "arrow.up")
                         .font(.system(size: 13, weight: .bold))
-                        .foregroundStyle(canSend ? .black : DS.Colors.textTertiary)
+                        .foregroundStyle(canSend ? .white : DS.Colors.textTertiary)
                 }
             }
             .scaleEffect(isHovered ? 1.05 : 1)

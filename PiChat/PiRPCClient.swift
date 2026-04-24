@@ -13,6 +13,8 @@ struct RPCCommand: Encodable {
     var modelId: String?
     var level: String?
     var enabled: Bool?
+    var mode: String?
+    var command: String?
     var customInstructions: String?
     var name: String?
     var sessionPath: String?
@@ -20,7 +22,7 @@ struct RPCCommand: Encodable {
     var parentSession: String?
 
     enum CodingKeys: String, CodingKey {
-        case id, type, message, images, provider, level, enabled, name
+        case id, type, message, images, provider, level, enabled, mode, command, name
         case streamingBehavior = "streamingBehavior"
         case modelId = "modelId"
         case customInstructions = "customInstructions"
@@ -59,6 +61,8 @@ struct RPCResponseData: Decodable {
     let messageCount: Int?
     let pendingMessageCount: Int?
     let autoCompactionEnabled: Bool?
+    let steeringMode: String?
+    let followUpMode: String?
 
     // get_available_models
     let models: [AgentModel]?
@@ -205,8 +209,10 @@ class PiRPCClient: ObservableObject {
     private var requestCounter = 0
     private var readTask: Task<Void, Never>?
 
-    var piPath: String = "/opt/homebrew/bin/pi"
+    var piPath: String = "pi"
     var workingDirectory: String = NSHomeDirectory()
+    var launchArguments: [String] = ["--no-session"]
+    var enableDebugLogging: Bool = false
 
     // MARK: - Lifecycle
 
@@ -214,12 +220,39 @@ class PiRPCClient: ObservableObject {
         guard !isRunning else { return }
 
         let proc = Process()
-        proc.executableURL = URL(fileURLWithPath: piPath)
-        proc.arguments = ["--mode", "rpc", "--no-session"]
+        let usesEnvLauncher = !piPath.contains("/")
+        if usesEnvLauncher {
+            proc.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+            proc.arguments = [piPath, "--mode", "rpc"] + launchArguments
+        } else {
+            let executablePath = NSString(string: piPath).expandingTildeInPath
+            guard FileManager.default.isExecutableFile(atPath: executablePath) else {
+                throw RPCError.commandFailed("pi executable not found or not executable: \(piPath)")
+            }
+            proc.executableURL = URL(fileURLWithPath: executablePath)
+            proc.arguments = ["--mode", "rpc"] + launchArguments
+        }
         proc.currentDirectoryURL = URL(fileURLWithPath: workingDirectory)
 
         var env = ProcessInfo.processInfo.environment
-        env["PATH"] = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+        let home = NSHomeDirectory()
+        let preferredPathParts = [
+            "/opt/homebrew/bin",
+            "/usr/local/bin",
+            "\(home)/.npm-global/bin",
+            "\(home)/.local/bin",
+            "/usr/bin",
+            "/bin",
+            "/usr/sbin",
+            "/sbin"
+        ]
+        let existingParts = (env["PATH"] ?? "").split(separator: ":").map(String.init)
+        var mergedParts: [String] = []
+        for part in preferredPathParts + existingParts {
+            guard !part.isEmpty, !mergedParts.contains(part) else { continue }
+            mergedParts.append(part)
+        }
+        env["PATH"] = mergedParts.joined(separator: ":")
         proc.environment = env
 
         let stdin = Pipe()
@@ -270,10 +303,12 @@ class PiRPCClient: ObservableObject {
         }
 
         // Setup stderr reading similarly
-        stderr.fileHandleForReading.readabilityHandler = { handle in
+        stderr.fileHandleForReading.readabilityHandler = { [weak self] handle in
             let data = handle.availableData
             if data.count > 0, let str = String(data: data, encoding: .utf8) {
-                print("[PI STDERR]: \(str)")
+                Task { @MainActor in
+                    self?.debugLog("[PI STDERR]: \(str.trimmingCharacters(in: .newlines))")
+                }
             }
         }
     }
@@ -297,7 +332,7 @@ class PiRPCClient: ObservableObject {
 
     @MainActor
     private func handleLine(_ line: String) async {
-        print("[RPC RX] \(line)")
+        debugLog("[RPC RX] \(line)")
         guard let data = line.data(using: .utf8) else { return }
 
         // Try to parse as raw dict first for flexible handling
@@ -457,7 +492,7 @@ class PiRPCClient: ObservableObject {
             throw RPCError.encodingFailed
         }
 
-        print("[RPC TX] \(line.trimmingCharacters(in: .newlines))")
+        debugLog("[RPC TX] \(line.trimmingCharacters(in: .newlines))")
 
         if let reqId = cmd.id {
             return try await withCheckedThrowingContinuation { cont in
@@ -513,6 +548,26 @@ class PiRPCClient: ObservableObject {
         try await sendCommand(cmd2)
     }
 
+    func setSteeringMode(_ mode: String) async throws {
+        let cmd = RPCCommand(id: nextId(), type: "set_steering_mode", mode: mode)
+        try await sendCommand(cmd)
+    }
+
+    func setFollowUpMode(_ mode: String) async throws {
+        let cmd = RPCCommand(id: nextId(), type: "set_follow_up_mode", mode: mode)
+        try await sendCommand(cmd)
+    }
+
+    func setAutoCompaction(enabled: Bool) async throws {
+        let cmd = RPCCommand(id: nextId(), type: "set_auto_compaction", enabled: enabled)
+        try await sendCommand(cmd)
+    }
+
+    func setAutoRetry(enabled: Bool) async throws {
+        let cmd = RPCCommand(id: nextId(), type: "set_auto_retry", enabled: enabled)
+        try await sendCommand(cmd)
+    }
+
     func getCommands() async throws -> [AgentCommand] {
         let data = try await sendCommand(RPCCommand(id: nextId(), type: "get_commands"))
         return data?.commands ?? []
@@ -546,6 +601,11 @@ class PiRPCClient: ObservableObject {
                 pipe.fileHandleForWriting.write(lineData)
             }
         }
+    }
+
+    private func debugLog(_ message: String) {
+        guard enableDebugLogging else { return }
+        print(message)
     }
 
     // MARK: - Errors
