@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.0.3] - 2026-04-24
+
+### Fixed
+- Restored original PiChat logo in welcome screen
+- Kept sparkle icon only for assistant messages
+- Added subtle animation to assistant message sparkle icon
+
 ## [1.0.2] - 2026-04-24
 
 ### Added
