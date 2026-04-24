@@ -91,6 +91,11 @@ class AppState: ObservableObject {
 
     // MARK: Notifications
     @Published var notification: AppNotification?
+    @Published var isOAuthLoginRunning: Bool = false
+    @Published var oauthLoginStatusText: String?
+    @Published var oauthPromptMessage: String?
+    @Published var oauthPromptPlaceholder: String?
+    @Published var oauthPromptInput: String = ""
 
     // MARK: Keyboard / Action Feedback
     @Published var keyFeedbackText: String?
@@ -207,6 +212,8 @@ class AppState: ObservableObject {
     private var responseWatchdogTask: Task<Void, Never>?
     private var keyFeedbackTask: Task<Void, Never>?
     private var busyActionDepth = 0
+    private var oauthHelperInputHandle: FileHandle?
+    private var oauthHelperProcess: Process?
 
     init() {
         let defaults = UserDefaults.standard
@@ -456,7 +463,7 @@ class AppState: ObservableObject {
                 logAgentError(e, context: "response:\(command ?? "unknown")")
                 show(notification: AppNotification(message: e, type: .error))
                 if command == "prompt" {
-                    addSystemMessage("❌ Ошибка ответа агента: \(e)")
+                    addSystemMessage("❌ Agent response error: \(e)")
                 }
             }
             if command == "set_model" || command == "cycle_model" {
@@ -489,10 +496,10 @@ class AppState: ObservableObject {
             guard let self else { return }
             guard self.isWaitingForResponse, !self.isStreaming else { return }
 
-            let msg = "Агент не начал отвечать вовремя. Возможно, упёрлись в лимит/квоту. Подробности: ~/Library/Logs/PiChat/agent-errors.log"
+            let msg = "Agent did not start responding in time. You may have hit a rate limit or quota. Details: ~/Library/Logs/PiChat/agent-errors.log"
             self.logAgentError(msg, context: "response_timeout")
             self.addSystemMessage("⚠️ \(msg)")
-            self.show(notification: AppNotification(message: "Агент молчит слишком долго — проверьте лимиты и лог ошибок", type: .warning))
+            self.show(notification: AppNotification(message: "Agent is silent for too long — check limits and error logs", type: .warning))
             self.isWaitingForResponse = false
         }
     }
@@ -526,6 +533,226 @@ class AppState: ObservableObject {
         }
     }
 
+    func startProviderLogin(_ provider: String?) async {
+        let providerId = (provider ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !providerId.isEmpty else {
+            oauthLoginStatusText = "Provider is required"
+            return
+        }
+        guard !isOAuthLoginRunning else { return }
+
+        isOAuthLoginRunning = true
+        oauthLoginStatusText = "Starting authentication for \(providerId)…"
+        oauthPromptMessage = nil
+        oauthPromptPlaceholder = nil
+        oauthPromptInput = ""
+
+        defer {
+            isOAuthLoginRunning = false
+            oauthHelperInputHandle = nil
+            oauthHelperProcess = nil
+        }
+
+        do {
+            try await runOAuthLogin(providerId: providerId)
+            loadConfigFiles()
+            oauthPromptMessage = nil
+            oauthPromptPlaceholder = nil
+            oauthPromptInput = ""
+            oauthLoginStatusText = "Authentication completed: \(providerId)"
+        } catch {
+            let fallback = "Authentication failed for \(providerId): \(error.localizedDescription)"
+            if let status = oauthLoginStatusText, !status.isEmpty, status != "Starting authentication for \(providerId)…" {
+                oauthLoginStatusText = status
+            } else {
+                oauthLoginStatusText = fallback
+            }
+        }
+    }
+
+    func submitOAuthPromptInput() {
+        guard let handle = oauthHelperInputHandle else { return }
+        let text = oauthPromptInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+
+        let line = text + "\n"
+        if let data = line.data(using: .utf8) {
+            handle.write(data)
+            oauthPromptInput = ""
+            oauthLoginStatusText = "Submitted verification input…"
+            oauthPromptMessage = nil
+            oauthPromptPlaceholder = nil
+        }
+    }
+
+    func cancelOAuthLogin() {
+        oauthHelperProcess?.terminate()
+        oauthHelperProcess = nil
+        oauthHelperInputHandle = nil
+        isOAuthLoginRunning = false
+        oauthLoginStatusText = "Authentication cancelled"
+    }
+
+    private func runOAuthLogin(providerId: String) async throws {
+        let script = """
+import { AuthStorage } from 'file:///opt/homebrew/lib/node_modules/@mariozechner/pi-coding-agent/dist/core/auth-storage.js';
+import readline from 'node:readline';
+
+const providerId = process.argv[1];
+const authPath = process.argv[2];
+
+const send = (obj) => process.stdout.write(JSON.stringify(obj) + '\\n');
+const rl = readline.createInterface({ input: process.stdin, output: process.stdout, terminal: false });
+const readInputLine = () => new Promise((resolve) => rl.once('line', (line) => resolve((line ?? '').trim())));
+
+try {
+  const storage = AuthStorage.create(authPath);
+  await storage.login(providerId, {
+    onAuth: (info) => send({ type: 'auth', url: info?.url ?? '', instructions: info?.instructions ?? '' }),
+    onProgress: (message) => send({ type: 'progress', message: message ?? '' }),
+    onPrompt: async (prompt) => {
+      send({ type: 'prompt', message: prompt?.message ?? 'Enter the requested value', placeholder: prompt?.placeholder ?? '' });
+      return await readInputLine();
+    },
+    onManualCodeInput: async () => {
+      send({ type: 'manual', message: 'Paste the authorization code or full redirect URL.' });
+      return await readInputLine();
+    }
+  });
+  send({ type: 'done' });
+  rl.close();
+} catch (error) {
+  send({ type: 'error', message: error?.message ?? String(error) });
+  rl.close();
+  process.exit(1);
+}
+"""
+
+        let authPath = URL(fileURLWithPath: piConfigDirectory).appendingPathComponent("auth.json").path
+
+        let nodeExecutable = resolveNodeExecutable()
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: nodeExecutable)
+        process.arguments = ["--input-type=module", "-e", script, providerId, authPath]
+
+        let stdin = Pipe()
+        let stdout = Pipe()
+        let stderr = Pipe()
+        process.standardInput = stdin
+        process.standardOutput = stdout
+        process.standardError = stderr
+
+        oauthHelperInputHandle = stdin.fileHandleForWriting
+        oauthHelperProcess = process
+
+        var stdoutBuffer = ""
+        var stderrBuffer = ""
+
+        stdout.fileHandleForReading.readabilityHandler = { [weak self] handle in
+            let data = handle.availableData
+            guard !data.isEmpty, let chunk = String(data: data, encoding: .utf8) else { return }
+
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                stdoutBuffer += chunk
+
+                while let newline = stdoutBuffer.firstIndex(of: "\n") {
+                    let line = String(stdoutBuffer[..<newline])
+                    stdoutBuffer = String(stdoutBuffer[stdoutBuffer.index(after: newline)...])
+                    self.handleOAuthHelperEventLine(line)
+                }
+            }
+        }
+
+        stderr.fileHandleForReading.readabilityHandler = { [weak self] handle in
+            let data = handle.availableData
+            guard !data.isEmpty, let chunk = String(data: data, encoding: .utf8) else { return }
+
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                stderrBuffer += chunk
+                let cleaned = chunk.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !cleaned.isEmpty {
+                    self.oauthLoginStatusText = cleaned
+                }
+            }
+        }
+
+        try process.run()
+
+        let status = await withCheckedContinuation { (continuation: CheckedContinuation<Int32, Never>) in
+            process.terminationHandler = { proc in
+                continuation.resume(returning: proc.terminationStatus)
+            }
+        }
+
+        stdout.fileHandleForReading.readabilityHandler = nil
+        stderr.fileHandleForReading.readabilityHandler = nil
+        oauthHelperInputHandle = nil
+        oauthHelperProcess = nil
+
+        if status != 0 {
+            let errText = stderrBuffer.trimmingCharacters(in: .whitespacesAndNewlines)
+            throw NSError(domain: "PiChatOAuth", code: Int(status), userInfo: [
+                NSLocalizedDescriptionKey: errText.isEmpty ? "OAuth helper failed" : errText
+            ])
+        }
+    }
+
+    private func resolveNodeExecutable() -> String {
+        let candidates = [
+            "/opt/homebrew/bin/node",
+            "/usr/local/bin/node",
+            "/usr/bin/node"
+        ]
+
+        for path in candidates where FileManager.default.isExecutableFile(atPath: path) {
+            return path
+        }
+
+        return "node"
+    }
+
+    private func handleOAuthHelperEventLine(_ line: String) {
+        guard let data = line.data(using: .utf8),
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let type = obj["type"] as? String else { return }
+
+        switch type {
+        case "auth":
+            if let urlString = obj["url"] as? String, let url = URL(string: urlString), !urlString.isEmpty {
+                NSWorkspace.shared.open(url)
+                oauthLoginStatusText = "Browser opened. Complete authentication, then paste verification data below if requested."
+            }
+
+        case "progress":
+            if let message = obj["message"] as? String, !message.isEmpty {
+                oauthLoginStatusText = message
+            }
+
+        case "prompt", "manual":
+            if let message = obj["message"] as? String, !message.isEmpty {
+                oauthPromptMessage = message
+                oauthPromptPlaceholder = obj["placeholder"] as? String
+                oauthLoginStatusText = message
+            }
+
+        case "done":
+            oauthPromptMessage = nil
+            oauthPromptPlaceholder = nil
+
+        case "error":
+            if let message = obj["message"] as? String, !message.isEmpty {
+                oauthLoginStatusText = message
+                oauthPromptMessage = message
+            }
+
+        default:
+            break
+        }
+    }
+
     func abortCurrentOperation() async {
         responseWatchdogTask?.cancel()
         isWaitingForResponse = false
@@ -548,7 +775,7 @@ class AppState: ObservableObject {
     }
 
     func startNewSession() async {
-        beginBusyAction("Создаю новую сессию…")
+        beginBusyAction("Creating new session…")
         defer { endBusyAction() }
 
         do {
@@ -557,18 +784,18 @@ class AppState: ObservableObject {
             activeTools.removeAll()
             await loadInitialState()
         } catch {
-            show(notification: AppNotification(message: "Не удалось создать новую сессию: \(error.localizedDescription)", type: .error))
+            show(notification: AppNotification(message: "Failed to create new session: \(error.localizedDescription)", type: .error))
         }
     }
 
     func compact() async {
-        beginBusyAction("Запрашиваю compact…")
+        beginBusyAction("Requesting compact…")
         defer { endBusyAction() }
 
         do {
             try await rpc.compact()
         } catch {
-            show(notification: AppNotification(message: "Не удалось запустить compact: \(error.localizedDescription)", type: .error))
+            show(notification: AppNotification(message: "Failed to run compact: \(error.localizedDescription)", type: .error))
         }
     }
 
@@ -587,7 +814,7 @@ class AppState: ObservableObject {
             try await rpc.setSteeringMode(mode)
             steeringMode = mode
         } catch {
-            show(notification: AppNotification(message: "Не удалось применить steering mode: \(error.localizedDescription)", type: .error))
+            show(notification: AppNotification(message: "Failed to apply steering mode: \(error.localizedDescription)", type: .error))
         }
     }
 
@@ -596,7 +823,7 @@ class AppState: ObservableObject {
             try await rpc.setFollowUpMode(mode)
             followUpMode = mode
         } catch {
-            show(notification: AppNotification(message: "Не удалось применить follow-up mode: \(error.localizedDescription)", type: .error))
+            show(notification: AppNotification(message: "Failed to apply follow-up mode: \(error.localizedDescription)", type: .error))
         }
     }
 
@@ -605,7 +832,7 @@ class AppState: ObservableObject {
             try await rpc.setAutoCompaction(enabled: enabled)
             autoCompactionEnabled = enabled
         } catch {
-            show(notification: AppNotification(message: "Не удалось изменить auto-compaction: \(error.localizedDescription)", type: .error))
+            show(notification: AppNotification(message: "Failed to change auto-compaction: \(error.localizedDescription)", type: .error))
         }
     }
 
@@ -614,7 +841,7 @@ class AppState: ObservableObject {
             try await rpc.setAutoRetry(enabled: enabled)
             autoRetryEnabled = enabled
         } catch {
-            show(notification: AppNotification(message: "Не удалось изменить auto-retry: \(error.localizedDescription)", type: .error))
+            show(notification: AppNotification(message: "Failed to change auto-retry: \(error.localizedDescription)", type: .error))
         }
     }
 
@@ -622,7 +849,7 @@ class AppState: ObservableObject {
         let trimmedProvider = provider.trimmingCharacters(in: .whitespacesAndNewlines)
         let trimmedModelId = modelId.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedProvider.isEmpty, !trimmedModelId.isEmpty else {
-            show(notification: AppNotification(message: "Provider и Model ID обязательны", type: .warning))
+            show(notification: AppNotification(message: "Provider and Model ID are required", type: .warning))
             return
         }
 
@@ -646,9 +873,9 @@ class AppState: ObservableObject {
                 currentModel = custom
             }
 
-            show(notification: AppNotification(message: "Модель применена: \(trimmedProvider)/\(trimmedModelId)", type: .success))
+            show(notification: AppNotification(message: "Model applied: \(trimmedProvider)/\(trimmedModelId)", type: .success))
         } catch {
-            show(notification: AppNotification(message: "Не удалось применить модель: \(error.localizedDescription)", type: .error))
+            show(notification: AppNotification(message: "Failed to apply model: \(error.localizedDescription)", type: .error))
         }
     }
 
@@ -668,21 +895,21 @@ class AppState: ObservableObject {
             let latestVersion = normalizedVersionString(release.tagName)
 
             guard isVersion(latestVersion, greaterThan: currentVersion) else {
-                show(notification: AppNotification(message: "У вас уже последняя версия (\(currentVersion))", type: .info))
+                show(notification: AppNotification(message: "You already have the latest version (\(currentVersion))", type: .info))
                 return
             }
 
             let download = release.assets?.first(where: { $0.name.lowercased().hasSuffix(".dmg") })?.browserDownloadURL
             let fallback = "https://github.com/Rrollan/PiChat/releases/latest/download/PiChat-macOS.dmg"
             guard let url = URL(string: download ?? fallback) else {
-                show(notification: AppNotification(message: "Не удалось сформировать ссылку на обновление", type: .error))
+                show(notification: AppNotification(message: "Failed to build update link", type: .error))
                 return
             }
 
             NSWorkspace.shared.open(url)
-            show(notification: AppNotification(message: "Найдена версия \(latestVersion). Открываю загрузку…", type: .success))
+            show(notification: AppNotification(message: "Version \(latestVersion) found. Opening download…", type: .success))
         } catch {
-            show(notification: AppNotification(message: "Не удалось проверить обновления: \(error.localizedDescription)", type: .error))
+            show(notification: AppNotification(message: "Failed to check updates: \(error.localizedDescription)", type: .error))
         }
     }
 
@@ -1010,9 +1237,9 @@ class AppState: ObservableObject {
             _ = try JSONSerialization.jsonObject(with: Data(settingsJSONText.utf8))
             try configManager.writeRawFile(named: "settings.json", content: settingsJSONText)
             applySettingsFormFromJSON()
-            show(notification: AppNotification(message: "settings.json сохранён", type: .success))
+            show(notification: AppNotification(message: "settings.json saved", type: .success))
         } catch {
-            show(notification: AppNotification(message: "Ошибка settings.json: \(error.localizedDescription)", type: .error))
+            show(notification: AppNotification(message: "settings.json error: \(error.localizedDescription)", type: .error))
         }
     }
 
@@ -1025,10 +1252,10 @@ class AppState: ObservableObject {
         do {
             _ = try JSONSerialization.jsonObject(with: Data(modelsJSONText.utf8))
             try configManager.writeRawFile(named: "models.json", content: modelsJSONText)
-            show(notification: AppNotification(message: "models.json сохранён", type: .success))
+            show(notification: AppNotification(message: "models.json saved", type: .success))
             Task { await reconnect() }
         } catch {
-            show(notification: AppNotification(message: "Ошибка models.json: \(error.localizedDescription)", type: .error))
+            show(notification: AppNotification(message: "models.json error: \(error.localizedDescription)", type: .error))
         }
     }
 
@@ -1037,10 +1264,10 @@ class AppState: ObservableObject {
             _ = try JSONSerialization.jsonObject(with: Data(authJSONText.utf8))
             try configManager.writeRawFile(named: "auth.json", content: authJSONText)
             authEntries = configManager.loadAuthEntries()
-            show(notification: AppNotification(message: "auth.json сохранён", type: .success))
+            show(notification: AppNotification(message: "auth.json saved", type: .success))
             Task { await reconnect() }
         } catch {
-            show(notification: AppNotification(message: "Ошибка auth.json: \(error.localizedDescription)", type: .error))
+            show(notification: AppNotification(message: "auth.json error: \(error.localizedDescription)", type: .error))
         }
     }
 
@@ -1048,16 +1275,16 @@ class AppState: ObservableObject {
         let p = provider.trimmingCharacters(in: .whitespacesAndNewlines)
         let k = key.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !p.isEmpty, !k.isEmpty else {
-            show(notification: AppNotification(message: "Provider и ключ обязательны", type: .warning))
+            show(notification: AppNotification(message: "Provider and key are required", type: .warning))
             return
         }
 
         do {
             try configManager.upsertApiKey(provider: p, key: k)
             loadConfigFiles()
-            show(notification: AppNotification(message: "Аккаунт обновлён: \(p)", type: .success))
+            show(notification: AppNotification(message: "Account updated: \(p)", type: .success))
         } catch {
-            show(notification: AppNotification(message: "Не удалось сохранить аккаунт: \(error.localizedDescription)", type: .error))
+            show(notification: AppNotification(message: "Failed to save account: \(error.localizedDescription)", type: .error))
         }
     }
 
@@ -1065,9 +1292,9 @@ class AppState: ObservableObject {
         do {
             try configManager.removeAuth(provider: provider)
             loadConfigFiles()
-            show(notification: AppNotification(message: "Аккаунт удалён: \(provider)", type: .success))
+            show(notification: AppNotification(message: "Account removed: \(provider)", type: .success))
         } catch {
-            show(notification: AppNotification(message: "Не удалось удалить аккаунт: \(error.localizedDescription)", type: .error))
+            show(notification: AppNotification(message: "Failed to remove account: \(error.localizedDescription)", type: .error))
         }
     }
 
@@ -1089,9 +1316,9 @@ class AppState: ObservableObject {
                                              reasoning: reasoning,
                                              supportsImages: supportsImages)
             loadConfigFiles()
-            show(notification: AppNotification(message: "Модель добавлена: \(provider)/\(modelId)", type: .success))
+            show(notification: AppNotification(message: "Model added: \(provider)/\(modelId)", type: .success))
         } catch {
-            show(notification: AppNotification(message: "Не удалось добавить модель: \(error.localizedDescription)", type: .error))
+            show(notification: AppNotification(message: "Failed to add model: \(error.localizedDescription)", type: .error))
         }
     }
 

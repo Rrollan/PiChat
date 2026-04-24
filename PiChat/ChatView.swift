@@ -124,14 +124,14 @@ struct ChatHeaderView: View {
 
     private func selectNewFolder() {
         guard let url = ScriptFilePicker.pickFolder(prompt: "Select Project Folder") else {
-            state.show(notification: AppNotification(message: "Выбор папки отменён", type: .warning))
+            state.show(notification: AppNotification(message: "Folder selection cancelled", type: .warning))
             return
         }
 
         let hasAccess = url.startAccessingSecurityScopedResource()
         Task {
             await state.changeProject(newDirectory: url.path)
-            state.show(notification: AppNotification(message: "Проект: \(url.lastPathComponent)", type: .success))
+            state.show(notification: AppNotification(message: "Project: \(url.lastPathComponent)", type: .success))
             if hasAccess {
                 url.stopAccessingSecurityScopedResource()
             }

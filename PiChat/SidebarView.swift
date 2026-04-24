@@ -471,17 +471,9 @@ struct SidebarActionsView: View {
 
             Spacer(minLength: 0)
 
-            Button {
+            IconButton(icon: "gearshape", color: DS.Colors.textSecondary, hoverColor: DS.Colors.accent) {
                 showAppSettings = true
-            } label: {
-                Image(systemName: "gearshape")
-                    .font(.system(size: 15, weight: .medium))
-                    .foregroundStyle(DS.Colors.textSecondary)
-                    .padding(6)
-                    .background(DS.Colors.surface)
-                    .clipShape(RoundedRectangle(cornerRadius: 6))
             }
-            .buttonStyle(.plain)
             .help("Settings")
             .sheet(isPresented: $showAppSettings) {
                 AppSettingsView()

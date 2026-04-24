@@ -88,7 +88,7 @@ struct InputAreaView: View {
     private func openFileImporter() {
         let urls = ScriptFilePicker.pickFiles(prompt: "Attach Files")
         if urls.isEmpty {
-            state.show(notification: AppNotification(message: "Выбор файлов отменён", type: .warning))
+            state.show(notification: AppNotification(message: "File selection cancelled", type: .warning))
             return
         }
 
@@ -97,7 +97,7 @@ struct InputAreaView: View {
             state.addFile(url: url)
             if hasAccess { url.stopAccessingSecurityScopedResource() }
         }
-        state.show(notification: AppNotification(message: "Добавлено файлов: \(urls.count)", type: .success))
+        state.show(notification: AppNotification(message: "Files added: \(urls.count)", type: .success))
     }
 
     private func handleDrop(providers: [NSItemProvider]) {

@@ -85,7 +85,7 @@ struct ActionFeedbackOverlay: View {
                     .font(DS.body(12, weight: .medium))
                     .foregroundStyle(DS.Colors.textPrimary)
             } else {
-                Text("Команда принята")
+                Text("Command received")
                     .font(DS.body(12, weight: .medium))
                     .foregroundStyle(DS.Colors.textPrimary)
             }

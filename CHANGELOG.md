@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.0.5] - 2026-04-24
+
+### Added
+- In-settings OAuth status panel with live progress, manual code/redirect input, and cancel action
+
+### Changed
+- Reworked Settings UI to be sectioned and English-only for consistency
+- Added built-in Pi OAuth authentication entries for Anthropic, GitHub Copilot, OpenAI Codex, Google Antigravity, and Google Gemini CLI
+- Improved OAuth helper process handling to avoid silent hangs and show actionable status updates
+- Unified Settings gear button hover/highlight behavior with other sidebar action icons
+
 ## [1.0.4] - 2026-04-24
 
 ### Added
