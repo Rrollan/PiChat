@@ -15,13 +15,10 @@
 <p align="center">
   <img alt="Platform" src="https://img.shields.io/badge/platform-macOS%2014%2B-111827" />
   <img alt="Swift" src="https://img.shields.io/badge/swift-5.9-orange" />
-  <img alt="Browser Control" src="https://img.shields.io/badge/browser%20control-PiBrowser-0ea5e9" />
   <img alt="License" src="https://img.shields.io/badge/license-MIT-10b981" />
 </p>
 
 PiChat is a clean, production-ready SwiftUI desktop app that runs `pi --mode rpc` behind the scenes and gives you a modern GUI for everyday agentic coding.
-
-With **[PiBrowser](https://github.com/Rrollan/PiBrowser)**, PiChat can also control Chrome through real browser tools: inspect pages, open tabs, click, type, scroll, take screenshots, and answer questions about the current browser page.
 
 ---
 
@@ -64,62 +61,6 @@ With **[PiBrowser](https://github.com/Rrollan/PiBrowser)**, PiChat can also cont
 - Extension dialogs (`confirm`, `select`, `input`, `editor`)
 - Full config editing (`settings.json`, `models.json`, `auth.json`)
 - Dynamic MCP list loaded from local `mcp.json`
-- PiBrowser pairing for local browser automation
-- Browser tool support: open tab, page context, click, type, press keys, scroll, screenshot, wait
-- Native bridge installer for Chrome Native Messaging
-
----
-
-## 🌐 PiBrowser — browser control for PiChat
-
-<p align="center">
-  <a href="https://github.com/Rrollan/PiBrowser">
-    <img src="docs/images/pibrowser-logo-hero.png" alt="PiBrowser" width="230" />
-  </a>
-</p>
-
-<p align="center">
-  <strong>PiBrowser is the companion Chrome extension that gives the Pi agent real browser tools.</strong>
-</p>
-
-<p align="center">
-  <a href="https://github.com/Rrollan/PiBrowser"><strong>Repository</strong></a>
-  ·
-  <a href="https://github.com/Rrollan/PiBrowser/releases/latest"><strong>Download extension ZIP</strong></a>
-  ·
-  <a href="https://github.com/Rrollan/PiBrowser/releases/latest/download/PiBrowser-extension.zip"><strong>Direct ZIP</strong></a>
-</p>
-
-<table>
-  <tr>
-    <td width="50%" valign="top">
-      <h3>What it adds</h3>
-      <ul>
-        <li>Open tabs and navigate websites</li>
-        <li>Read the current page and DOM context</li>
-        <li>Click, type, press keys, and scroll</li>
-        <li>Capture screenshots when visual context is needed</li>
-        <li>Show a page highlight and animated cursor while the agent acts</li>
-      </ul>
-    </td>
-    <td width="50%" valign="top">
-      <h3>How to connect</h3>
-      <ol>
-        <li>Install PiChat.</li>
-        <li>Install PiBrowser from the release ZIP.</li>
-        <li>Open PiBrowser and copy its browser ID.</li>
-        <li>Paste it into <strong>PiChat → Settings → Browser</strong>.</li>
-        <li>Press <strong>Connect Browser</strong>, reload PiBrowser, then press <strong>Connect</strong>.</li>
-      </ol>
-    </td>
-  </tr>
-</table>
-
-<p align="center">
-  <img src="docs/images/pibrowser-connected.png" alt="PiBrowser connected side panel" width="360" />
-</p>
-
-PiBrowser runs as an executor: the reasoning stays in PiChat/pi, while Chrome actions go through explicit `browser_*` tools and return structured results back to the agent.
 
 ---
 
@@ -215,6 +156,61 @@ gh release create v1.0.0 build/PiChat-macOS.dmg --title "PiChat v1.0.0" --notes-
 - `scripts/` — build + release scripts
 - `docs/images/` — logos and screenshots
 - `.github/workflows/` — CI workflow for macOS build
+
+---
+
+## 🌐 PiBrowser — browser control for PiChat
+
+With **[PiBrowser](https://github.com/Rrollan/PiBrowser)**, PiChat can also control Chrome through real browser tools: inspect pages, open tabs, click, type, scroll, take screenshots, and answer questions about the current browser page.
+
+<p align="center">
+  <a href="https://github.com/Rrollan/PiBrowser">
+    <img src="docs/images/pibrowser-logo-hero.png" alt="PiBrowser" width="230" />
+  </a>
+</p>
+
+<p align="center">
+  <strong>PiBrowser is the companion Chrome extension that gives the Pi agent real browser tools.</strong>
+</p>
+
+<p align="center">
+  <a href="https://github.com/Rrollan/PiBrowser"><strong>Repository</strong></a>
+  ·
+  <a href="https://github.com/Rrollan/PiBrowser/releases/latest"><strong>Download extension ZIP</strong></a>
+  ·
+  <a href="https://github.com/Rrollan/PiBrowser/releases/latest/download/PiBrowser-extension.zip"><strong>Direct ZIP</strong></a>
+</p>
+
+<table>
+  <tr>
+    <td width="50%" valign="top">
+      <h3>What it adds</h3>
+      <ul>
+        <li>Open tabs and navigate websites</li>
+        <li>Read the current page and DOM context</li>
+        <li>Click, type, press keys, and scroll</li>
+        <li>Capture screenshots when visual context is needed</li>
+        <li>Show a page highlight and animated cursor while the agent acts</li>
+      </ul>
+    </td>
+    <td width="50%" valign="top">
+      <h3>How to connect</h3>
+      <ol>
+        <li>Install PiChat.</li>
+        <li>Install PiBrowser from the release ZIP.</li>
+        <li>Open PiBrowser and copy its browser ID.</li>
+        <li>Paste it into <strong>PiChat → Settings → Browser</strong>.</li>
+        <li>Press <strong>Connect Browser</strong>, reload PiBrowser, then press <strong>Connect</strong>.</li>
+      </ol>
+    </td>
+  </tr>
+</table>
+
+<p align="center">
+  <img src="docs/images/pibrowser-connected.png" alt="PiBrowser connected side panel" width="360" />
+</p>
+
+PiBrowser runs as an executor: the reasoning stays in PiChat/pi, while Chrome actions go through explicit `browser_*` tools and return structured results back to the agent.
 
 ---
 
