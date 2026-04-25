@@ -54,6 +54,7 @@ struct ChatView: View {
 
 struct ChatHeaderView: View {
     @EnvironmentObject var state: AppState
+    @State private var isFolderButtonHovered = false
 
     var body: some View {
         HStack(spacing: DS.Spacing.md) {
@@ -87,14 +88,21 @@ struct ChatHeaderView: View {
                     Text(URL(fileURLWithPath: state.rpc.workingDirectory).lastPathComponent)
                         .font(DS.body(11, weight: .semibold))
                 }
-                .foregroundStyle(DS.Colors.textSecondary)
+                .foregroundStyle(isFolderButtonHovered ? DS.Colors.textPrimary : DS.Colors.textSecondary)
                 .padding(.horizontal, DS.Spacing.md)
                 .padding(.vertical, 6)
-                .background(DS.Colors.surfaceElevated)
+                .background(isFolderButtonHovered ? DS.Colors.accentDim : DS.Colors.surfaceElevated)
                 .clipShape(RoundedRectangle(cornerRadius: DS.Radius.sm))
-                .overlay(RoundedRectangle(cornerRadius: DS.Radius.sm).stroke(DS.Colors.border, lineWidth: 1))
+                .overlay(
+                    RoundedRectangle(cornerRadius: DS.Radius.sm)
+                        .stroke(isFolderButtonHovered ? DS.Colors.borderAccent : DS.Colors.border, lineWidth: 1)
+                )
+                .scaleEffect(isFolderButtonHovered ? 1.015 : 1)
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .onHover { isFolderButtonHovered = $0 }
+            .animation(.easeInOut(duration: 0.12), value: isFolderButtonHovered)
             .help(state.rpc.workingDirectory)
 
             // Abort button when streaming
@@ -385,6 +393,8 @@ struct ThinkingBlockView: View {
                         .font(.system(size: 9))
                         .foregroundStyle(DS.Colors.textTertiary)
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
 
@@ -466,6 +476,8 @@ struct ToolCallCardView: View {
                 }
                 .padding(.horizontal, DS.Spacing.sm)
                 .padding(.vertical, 6)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
 

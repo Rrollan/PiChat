@@ -118,6 +118,7 @@ struct AppSettingsView: View {
                 }
                 Spacer()
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
             .foregroundStyle(selectedSection == section ? DS.Colors.textPrimary : DS.Colors.textSecondary)
             .padding(.horizontal, DS.Spacing.sm)
             .padding(.vertical, 8)
@@ -129,8 +130,10 @@ struct AppSettingsView: View {
                 RoundedRectangle(cornerRadius: DS.Radius.sm)
                     .stroke(selectedSection == section ? DS.Colors.border : .clear, lineWidth: 1)
             )
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var content: some View {
@@ -148,6 +151,8 @@ struct AppSettingsView: View {
                     customModelsCard
                 case .project:
                     agentActionsCard
+                case .browser:
+                    browserAssistantCard
                 case .advanced:
                     rpcBehaviorCard
                     advancedDataCard
@@ -376,6 +381,60 @@ struct AppSettingsView: View {
                 modelName = ""
             }
             .buttonStyle(.borderedProminent)
+        }
+    }
+
+    private var browserAssistantCard: some View {
+        settingsCard(title: "Browser Assistant", subtitle: "Connect Browspi Chrome extension to local Pi/PiChat") {
+            Text("This installs Chrome Native Messaging host com.browspi.pi_bridge. Browspi can then connect without a separate HTTP bridge.")
+                .font(DS.body(11))
+                .foregroundStyle(DS.Colors.textTertiary)
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Browspi Browser UID")
+                    .font(DS.body(11, weight: .semibold))
+                    .foregroundStyle(DS.Colors.textSecondary)
+                TextField("Paste digit-only Browser UID from Browspi Connect", text: $state.browserExtensionId)
+                    .font(DS.mono(11))
+                    .textFieldStyle(.roundedBorder)
+                    .onChange(of: state.browserExtensionId) { _, _ in
+                        state.persistBrowserSettings()
+                        state.refreshBrowserBridgeStatus()
+                    }
+            }
+
+            HStack(spacing: DS.Spacing.sm) {
+                Button("Install / Update Native Bridge") {
+                    Task { await state.installBrowserNativeBridge() }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(state.isInstallingBrowserBridge || state.browserExtensionId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+                Button("Open Chrome Extensions") { state.openChromeExtensionsPage() }
+                    .buttonStyle(.bordered)
+
+                Button("Refresh") { state.refreshBrowserBridgeStatus() }
+                    .buttonStyle(.bordered)
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(state.browserBridgeStatusText)
+                    .font(DS.body(11, weight: .medium))
+                    .foregroundStyle(DS.Colors.textPrimary)
+                Text(state.browserBridgeManifestPath)
+                    .font(DS.mono(10))
+                    .foregroundStyle(DS.Colors.textTertiary)
+                    .textSelection(.enabled)
+            }
+            .padding(.horizontal, DS.Spacing.sm)
+            .padding(.vertical, 8)
+            .background(DS.Colors.surfaceElevated)
+            .clipShape(RoundedRectangle(cornerRadius: DS.Radius.sm))
+            .overlay(RoundedRectangle(cornerRadius: DS.Radius.sm).stroke(DS.Colors.border, lineWidth: 1))
+
+            Text("After installing: reload the Browspi extension, open its side panel, and press Connect. Browspi shows the digit-only Browser UID in the Connect error hint/title.")
+                .font(DS.body(10))
+                .foregroundStyle(DS.Colors.textTertiary)
         }
     }
 
@@ -624,6 +683,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
     case general
     case accounts
     case project
+    case browser
     case advanced
 
     var id: String { rawValue }
@@ -633,6 +693,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
         case .general: return "General"
         case .accounts: return "Accounts & Models"
         case .project: return "Project"
+        case .browser: return "Browser"
         case .advanced: return "Advanced"
         }
     }
@@ -642,6 +703,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
         case .general: return "Theme, runtime, current model"
         case .accounts: return "Authentication and custom providers"
         case .project: return "Folder, session, actions"
+        case .browser: return "Browspi native bridge"
         case .advanced: return "CLI, JSON, low-level controls"
         }
     }
@@ -651,6 +713,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
         case .general: return "slider.horizontal.3"
         case .accounts: return "person.crop.rectangle.stack"
         case .project: return "folder"
+        case .browser: return "globe"
         case .advanced: return "wrench.and.screwdriver"
         }
     }

@@ -97,6 +97,8 @@ struct ModelSectionView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: DS.Spacing.sm) {
             SectionHeader(title: "Model", icon: "cpu")
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
                 .onTapGesture { withAnimation { isExpanded.toggle() } }
 
             // Current model
@@ -133,6 +135,7 @@ struct ModelSectionView: View {
                 VStack(spacing: 2) {
                     ForEach(state.availableModels) { model in
                         ModelRow(model: model, isSelected: model.id == state.currentModel?.id)
+                            .contentShape(Rectangle())
                             .onTapGesture {
                                 Task { await state.setModel(model) }
                                 withAnimation { isExpanded = false }
@@ -200,15 +203,18 @@ struct ThinkingLevelPicker: View {
         HStack(spacing: 0) {
             ForEach(levels, id: \.self) { level in
                 let isSelected = state.thinkingLevel == level
-                Text(level)
-                    .font(DS.mono(9, weight: isSelected ? .bold : .regular))
-                    .foregroundStyle(isSelected ? DS.Colors.accent : DS.Colors.textTertiary)
-                    .padding(.horizontal, 6).padding(.vertical, 4)
-                    .frame(maxWidth: .infinity)
-                    .background(isSelected ? DS.Colors.accentDim : .clear)
-                    .onTapGesture {
-                        Task { await state.setThinkingLevel(level) }
-                    }
+                Button {
+                    Task { await state.setThinkingLevel(level) }
+                } label: {
+                    Text(level)
+                        .font(DS.mono(9, weight: isSelected ? .bold : .regular))
+                        .foregroundStyle(isSelected ? DS.Colors.accent : DS.Colors.textTertiary)
+                        .padding(.horizontal, 6).padding(.vertical, 4)
+                        .frame(maxWidth: .infinity)
+                        .background(isSelected ? DS.Colors.accentDim : .clear)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
             }
         }
         .background(DS.Colors.surfaceElevated)
@@ -349,6 +355,7 @@ struct CommandRow: View {
         .padding(.horizontal, 6).padding(.vertical, 4)
         .background(isHovered ? color.opacity(0.08) : .clear)
         .clipShape(RoundedRectangle(cornerRadius: 4))
+        .contentShape(Rectangle())
         .onHover { isHovered = $0 }
         .onTapGesture {
             state.inputText = "/\(cmd.name) "

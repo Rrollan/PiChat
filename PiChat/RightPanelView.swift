@@ -17,8 +17,10 @@ struct RightPanelView: View {
                                   isSelected: selectedTab == i) {
                             withAnimation(.spring(response: 0.25)) { selectedTab = i }
                         }
+                        .frame(maxWidth: .infinity)
                     }
                 }
+                .frame(maxWidth: .infinity)
 
                 Button {
                     withAnimation { showRightPanel = false }
@@ -76,6 +78,7 @@ struct TabButton: View {
             .frame(maxWidth: .infinity)
             .background(isSelected ? DS.Colors.accentDim : .clear)
             .clipShape(RoundedRectangle(cornerRadius: DS.Radius.sm))
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .onHover { isHovered = $0 }

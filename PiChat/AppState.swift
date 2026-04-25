@@ -199,6 +199,12 @@ class AppState: ObservableObject {
     // MARK: App Update
     @Published var isCheckingForUpdates = false
 
+    // MARK: Browser Assistant
+    @Published var browserExtensionId: String = ""
+    @Published var browserBridgeStatusText: String = "Not installed"
+    @Published var browserBridgeManifestPath: String = NativeMessagingInstaller.chromeManifestPath.path
+    @Published var isInstallingBrowserBridge = false
+
     // MARK: Install Location Hint
     @Published var shouldSuggestMoveToApplications = false
 
@@ -240,6 +246,8 @@ class AppState: ObservableObject {
         self.cliSystemPrompt = defaults.string(forKey: "pi.cli.systemPrompt") ?? ""
         self.cliAppendSystemPrompt = defaults.string(forKey: "pi.cli.appendSystemPrompt") ?? ""
         self.cliExtraArgs = defaults.string(forKey: "pi.cli.extraArgs") ?? ""
+        self.browserExtensionId = defaults.string(forKey: "browser.extensionId") ?? ""
+        refreshBrowserBridgeStatus()
         setupEventHandling()
         loadConfigFiles()
     }
@@ -978,6 +986,59 @@ try {
 
     func openApplicationsFolder() {
         NSWorkspace.shared.open(URL(fileURLWithPath: "/Applications", isDirectory: true))
+    }
+
+    func persistBrowserSettings() {
+        UserDefaults.standard.set(browserExtensionId.trimmingCharacters(in: .whitespacesAndNewlines), forKey: "browser.extensionId")
+    }
+
+    func refreshBrowserBridgeStatus() {
+        let id = browserExtensionId.trimmingCharacters(in: .whitespacesAndNewlines)
+        browserBridgeManifestPath = NativeMessagingInstaller.chromeManifestPath.path
+        guard !id.isEmpty else {
+            browserBridgeStatusText = "Paste your Browspi Browser UID to install the native bridge."
+            return
+        }
+        if let normalizedId = try? NativeMessagingInstaller.normalizeExtensionId(id) {
+            browserBridgeStatusText = NativeMessagingInstaller.isInstalled(extensionId: id)
+                ? "Installed for chrome-extension://\(normalizedId)/"
+                : "Not installed for this Browser UID."
+        } else {
+            browserBridgeStatusText = "Invalid Browser UID. Paste the digit-only UID shown by Browspi Connect."
+        }
+    }
+
+    func installBrowserNativeBridge() async {
+        isInstallingBrowserBridge = true
+        defer { isInstallingBrowserBridge = false }
+        do {
+            persistBrowserSettings()
+            let result = try NativeMessagingInstaller.install(extensionId: browserExtensionId)
+            browserBridgeManifestPath = result.manifestPath
+            browserBridgeStatusText = "Installed. Restart/reload Browspi and click Connect."
+            notification = AppNotification(message: "Browser bridge installed for \(result.allowedOrigin)", type: .success)
+        } catch {
+            browserBridgeStatusText = error.localizedDescription
+            notification = AppNotification(message: "Browser bridge install failed: \(error.localizedDescription)", type: .error)
+        }
+    }
+
+    func openChromeExtensionsPage() {
+        guard let extensionsURL = URL(string: "chrome://extensions/") else { return }
+
+        let configuration = NSWorkspace.OpenConfiguration()
+        configuration.activates = true
+
+        if let defaultBrowserURL = NSWorkspace.shared.urlForApplication(toOpen: URL(string: "https://example.com")!) {
+            NSWorkspace.shared.open([extensionsURL], withApplicationAt: defaultBrowserURL, configuration: configuration) { [weak self] _, error in
+                if let error {
+                    self?.notification = AppNotification(message: "Could not open chrome://extensions/ in default browser: \(error.localizedDescription)", type: .warning)
+                }
+            }
+            return
+        }
+
+        NSWorkspace.shared.open(extensionsURL)
     }
 
     func persistRuntimeSettings() {

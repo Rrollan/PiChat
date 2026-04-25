@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <strong>Native macOS client for the <a href="https://github.com/mariozechner/pi-coding-agent">pi coding agent</a></strong>
+  <strong>Native macOS client for the <a href="https://github.com/badlogic/pi-mono">pi coding agent</a></strong>
 </p>
 
 <p align="center">
@@ -40,7 +40,7 @@ PiChat is a clean, production-ready SwiftUI desktop app that runs `pi --mode rpc
 
 ## 🚀 First launch
 
-1. Install pi coding agent:
+1. Install pi coding agent (source: https://github.com/badlogic/pi-mono):
    ```bash
    npm install -g @mariozechner/pi-coding-agent
    ```
@@ -98,7 +98,7 @@ Run sanity scan before each release:
 
 1. macOS 14+
 2. Xcode Command Line Tools
-3. Installed pi coding agent:
+3. Installed pi coding agent (source: https://github.com/badlogic/pi-mono):
 
 ```bash
 npm install -g @mariozechner/pi-coding-agent
