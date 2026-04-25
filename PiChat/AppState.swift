@@ -2,6 +2,7 @@ import Foundation
 import Combine
 import SwiftUI
 import AppKit
+import UniformTypeIdentifiers
 
 // MARK: - Chat Message Model
 
@@ -40,6 +41,25 @@ struct FileAttachment: Identifiable {
     var isImage: Bool { mimeType.hasPrefix("image/") }
 }
 
+struct PastedContent: Identifiable {
+    let id = UUID()
+    let content: String
+    let timestamp: Date = Date()
+    var wordCount: Int { content.split(whereSeparator: { $0.isWhitespace }).count }
+    var title: String { "Pasted text" }
+}
+
+struct ModelProviderGroup: Identifiable {
+    let id: String
+    let provider: String
+    let models: [AgentModel]
+    let isConnected: Bool
+}
+
+extension AgentModel {
+    var modelKey: String { "\(provider)/\(id)" }
+}
+
 // MARK: - App State
 
 @MainActor
@@ -58,6 +78,7 @@ class AppState: ObservableObject {
     // MARK: Model & Session
     @Published var currentModel: AgentModel?
     @Published var availableModels: [AgentModel] = []
+    @Published var hiddenModelKeys: [String] = []
     @Published var thinkingLevel: String = "off"
     @Published var steeringMode: String = "one-at-a-time"
     @Published var followUpMode: String = "one-at-a-time"
@@ -107,6 +128,7 @@ class AppState: ObservableObject {
     // MARK: Input
     @Published var inputText: String = ""
     @Published var attachedFiles: [FileAttachment] = []
+    @Published var pastedContents: [PastedContent] = []
 
     // MARK: Pi Runtime & Config
     @Published var piPath: String
@@ -252,6 +274,7 @@ class AppState: ObservableObject {
         self.cliSystemPrompt = defaults.string(forKey: "pi.cli.systemPrompt") ?? ""
         self.cliAppendSystemPrompt = defaults.string(forKey: "pi.cli.appendSystemPrompt") ?? ""
         self.cliExtraArgs = defaults.string(forKey: "pi.cli.extraArgs") ?? ""
+        self.hiddenModelKeys = defaults.stringArray(forKey: "pi.hiddenModelKeys") ?? []
         self.browserToolsEnabled = true
         self.browserExtensionId = defaults.string(forKey: "browser.extensionId") ?? ""
         self.browserPairingToken = defaults.string(forKey: "browser.pairingToken") ?? ""
@@ -351,9 +374,13 @@ class AppState: ObservableObject {
             responseWatchdogTask?.cancel()
             isWaitingForResponse = false
             isStreaming = true
-            let msg = ChatMessage(role: .assistant, text: "", isStreaming: true)
-            messages.append(msg)
-            currentAssistantMessageIndex = messages.count - 1
+            if let idx = currentAssistantMessageIndex, messages.indices.contains(idx), messages[idx].role == .assistant {
+                messages[idx].isStreaming = true
+            } else {
+                let msg = ChatMessage(role: .assistant, text: "", isStreaming: true)
+                messages.append(msg)
+                currentAssistantMessageIndex = messages.count - 1
+            }
 
         case .agentEnd:
             isWaitingForResponse = false
@@ -516,6 +543,10 @@ class AppState: ObservableObject {
             self.logAgentError(msg, context: "response_timeout")
             self.addSystemMessage("⚠️ \(msg)")
             self.show(notification: AppNotification(message: "Agent is silent for too long — check limits and error logs", type: .warning))
+            if let idx = self.currentAssistantMessageIndex, self.messages.indices.contains(idx), self.messages[idx].text.isEmpty, self.messages[idx].thinkingText.isEmpty {
+                self.messages[idx].isStreaming = false
+                self.currentAssistantMessageIndex = nil
+            }
             self.isWaitingForResponse = false
         }
     }
@@ -524,10 +555,20 @@ class AppState: ObservableObject {
 
     func sendMessage() async {
         let text = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty || !attachedFiles.isEmpty else { return }
+        guard !text.isEmpty || !attachedFiles.isEmpty || !pastedContents.isEmpty else { return }
 
-        let userMsg = ChatMessage(role: .user, text: text, attachments: attachedFiles)
+        let pastedText = pastedContents.map { item in
+            "\n\n--- Pasted content (\(item.wordCount) words) ---\n\(item.content)"
+        }.joined()
+        let promptText = text + pastedText
+        let displayText = text.isEmpty && !pastedContents.isEmpty ? "Pasted content attached" : text
+
+        let userMsg = ChatMessage(role: .user, text: displayText, attachments: attachedFiles)
         messages.append(userMsg)
+
+        let assistantPlaceholder = ChatMessage(role: .assistant, text: "", isStreaming: true)
+        messages.append(assistantPlaceholder)
+        currentAssistantMessageIndex = messages.count - 1
 
         let images: [RPCImage] = attachedFiles.compactMap { att in
             guard att.isImage, let b64 = att.base64Data else { return nil }
@@ -536,14 +577,19 @@ class AppState: ObservableObject {
 
         inputText = ""
         attachedFiles = []
+        pastedContents = []
         isWaitingForResponse = true
         startResponseWatchdog()
 
         do {
-            try await rpc.prompt(text, images: images)
+            try await rpc.prompt(promptText, images: images)
         } catch {
             responseWatchdogTask?.cancel()
             isWaitingForResponse = false
+            if let idx = currentAssistantMessageIndex, messages.indices.contains(idx), messages[idx].text.isEmpty, messages[idx].thinkingText.isEmpty {
+                messages[idx].isStreaming = false
+            }
+            currentAssistantMessageIndex = nil
             logAgentError(error.localizedDescription, context: "prompt_send")
             addSystemMessage("❌ \(error.localizedDescription)")
         }
@@ -575,6 +621,10 @@ class AppState: ObservableObject {
             oauthPromptMessage = nil
             oauthPromptPlaceholder = nil
             oauthPromptInput = ""
+            oauthLoginStatusText = "Authentication completed: \(providerId). Refreshing models…"
+            if isConnected {
+                await reconnect()
+            }
             oauthLoginStatusText = "Authentication completed: \(providerId)"
         } catch {
             let fallback = "Authentication failed for \(providerId): \(error.localizedDescription)"
@@ -815,9 +865,128 @@ try {
         }
     }
 
+    var connectedProviderIDs: Set<String> {
+        var providers = Set(authEntries.map { normalizeProviderID($0.provider) })
+        providers.formUnion(configuredModelProviderIDs())
+
+        let trimmedCLIProvider = cliProvider.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmedCLIProvider.isEmpty && !cliApiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            providers.insert(normalizeProviderID(trimmedCLIProvider))
+        }
+
+        if let currentModel {
+            providers.insert(normalizeProviderID(currentModel.provider))
+        }
+
+        return providers
+    }
+
+    var connectedAvailableModels: [AgentModel] {
+        let connected = connectedProviderIDs
+        guard !connected.isEmpty else { return [] }
+        return availableModels.filter { isProvider($0.provider, connectedTo: connected) }
+    }
+
+    var visibleModels: [AgentModel] {
+        let hidden = Set(hiddenModelKeys)
+        return connectedAvailableModels.filter { model in
+            !hidden.contains(model.modelKey) || model.modelKey == currentModel?.modelKey
+        }
+    }
+
+    var hiddenModels: [AgentModel] {
+        let hidden = Set(hiddenModelKeys)
+        return connectedAvailableModels.filter { model in
+            hidden.contains(model.modelKey) && model.modelKey != currentModel?.modelKey
+        }
+    }
+
+    var visibleModelGroups: [ModelProviderGroup] {
+        groupedModels(visibleModels)
+    }
+
+    var hiddenModelGroups: [ModelProviderGroup] {
+        groupedModels(hiddenModels)
+    }
+
+    var disconnectedModelCount: Int {
+        max(0, availableModels.count - connectedAvailableModels.count)
+    }
+
     func setModel(_ model: AgentModel) async {
         try? await rpc.setModel(provider: model.provider, modelId: model.id)
         currentModel = model
+        unhideModelIfNeeded(model, notify: false)
+    }
+
+    func hideModel(_ model: AgentModel) {
+        guard model.modelKey != currentModel?.modelKey else {
+            show(notification: AppNotification(message: "Current model cannot be hidden", type: .warning))
+            return
+        }
+        if !hiddenModelKeys.contains(model.modelKey) {
+            hiddenModelKeys.append(model.modelKey)
+            hiddenModelKeys.sort()
+            persistHiddenModels()
+            show(notification: AppNotification(message: "Hidden from selector: \(model.name)", type: .success))
+        }
+    }
+
+    func showModel(_ model: AgentModel) {
+        unhideModelIfNeeded(model, notify: true)
+    }
+
+    func resetHiddenModels() {
+        hiddenModelKeys.removeAll()
+        persistHiddenModels()
+        show(notification: AppNotification(message: "All connected models are visible", type: .success))
+    }
+
+    private func unhideModelIfNeeded(_ model: AgentModel, notify: Bool) {
+        guard hiddenModelKeys.contains(model.modelKey) else { return }
+        hiddenModelKeys.removeAll { $0 == model.modelKey }
+        persistHiddenModels()
+        if notify {
+            show(notification: AppNotification(message: "Visible in selector: \(model.name)", type: .success))
+        }
+    }
+
+    private func persistHiddenModels() {
+        UserDefaults.standard.set(hiddenModelKeys, forKey: "pi.hiddenModelKeys")
+    }
+
+    private func groupedModels(_ models: [AgentModel]) -> [ModelProviderGroup] {
+        let grouped = Dictionary(grouping: models) { $0.provider }
+        return grouped.keys.sorted { lhs, rhs in
+            lhs.localizedCaseInsensitiveCompare(rhs) == .orderedAscending
+        }.map { provider in
+            ModelProviderGroup(
+                id: provider,
+                provider: provider,
+                models: (grouped[provider] ?? []).sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending },
+                isConnected: isProvider(provider, connectedTo: connectedProviderIDs)
+            )
+        }
+    }
+
+    private func configuredModelProviderIDs() -> Set<String> {
+        guard let data = modelsJSONText.data(using: .utf8),
+              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let providers = root["providers"] as? [String: Any] else {
+            return []
+        }
+        return Set(providers.keys.map { normalizeProviderID($0) })
+    }
+
+    private func isProvider(_ provider: String, connectedTo connected: Set<String>) -> Bool {
+        let normalized = normalizeProviderID(provider)
+        return connected.contains(normalized)
+    }
+
+    private func normalizeProviderID(_ provider: String) -> String {
+        provider.trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .replacingOccurrences(of: "_", with: "-")
     }
 
     func setThinkingLevel(_ level: String) async {
@@ -1457,6 +1626,7 @@ try {
             try configManager.upsertApiKey(provider: p, key: k)
             loadConfigFiles()
             show(notification: AppNotification(message: "Account updated: \(p)", type: .success))
+            if isConnected { Task { await reconnect() } }
         } catch {
             show(notification: AppNotification(message: "Failed to save account: \(error.localizedDescription)", type: .error))
         }
@@ -1467,6 +1637,7 @@ try {
             try configManager.removeAuth(provider: provider)
             loadConfigFiles()
             show(notification: AppNotification(message: "Account removed: \(provider)", type: .success))
+            if isConnected { Task { await reconnect() } }
         } catch {
             show(notification: AppNotification(message: "Failed to remove account: \(error.localizedDescription)", type: .error))
         }
@@ -1491,6 +1662,7 @@ try {
                                              supportsImages: supportsImages)
             loadConfigFiles()
             show(notification: AppNotification(message: "Model added: \(provider)/\(modelId)", type: .success))
+            if isConnected { Task { await reconnect() } }
         } catch {
             show(notification: AppNotification(message: "Failed to add model: \(error.localizedDescription)", type: .error))
         }
@@ -1530,10 +1702,17 @@ try {
     // MARK: - File Handling
 
     func addFile(url: URL) {
-        let mime = mimeType(for: url)
-        var att = FileAttachment(url: url, name: url.lastPathComponent, mimeType: mime)
-        if let data = try? Data(contentsOf: url) {
-            att = FileAttachment(url: url, name: url.lastPathComponent, mimeType: mime,
+        let normalizedURL = url.standardizedFileURL
+        guard !attachedFiles.contains(where: { $0.url.standardizedFileURL == normalizedURL }) else { return }
+
+        let mime = mimeType(for: normalizedURL)
+        var att = FileAttachment(url: normalizedURL, name: normalizedURL.lastPathComponent, mimeType: mime)
+        let hasAccess = normalizedURL.startAccessingSecurityScopedResource()
+        defer {
+            if hasAccess { normalizedURL.stopAccessingSecurityScopedResource() }
+        }
+        if let data = try? Data(contentsOf: normalizedURL) {
+            att = FileAttachment(url: normalizedURL, name: normalizedURL.lastPathComponent, mimeType: mime,
                                   base64Data: data.base64EncodedString())
         }
         attachedFiles.append(att)
@@ -1543,15 +1722,31 @@ try {
         attachedFiles.removeAll { $0.id == id }
     }
 
+    func addPastedContent(_ content: String) {
+        let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        pastedContents.append(PastedContent(content: trimmed))
+    }
+
+    func removePastedContent(id: UUID) {
+        pastedContents.removeAll { $0.id == id }
+    }
+
     private func mimeType(for url: URL) -> String {
+        if let type = UTType(filenameExtension: url.pathExtension),
+           let mime = type.preferredMIMEType {
+            return mime
+        }
+
         let ext = url.pathExtension.lowercased()
         switch ext {
         case "jpg", "jpeg": return "image/jpeg"
         case "png": return "image/png"
         case "gif": return "image/gif"
         case "webp": return "image/webp"
+        case "heic": return "image/heic"
         case "pdf": return "application/pdf"
-        default: return "text/plain"
+        default: return "application/octet-stream"
         }
     }
 }

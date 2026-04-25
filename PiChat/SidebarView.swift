@@ -132,20 +132,58 @@ struct ModelSectionView: View {
 
             // Model list (expandable)
             if isExpanded {
-                VStack(spacing: 2) {
-                    ForEach(state.availableModels) { model in
-                        ModelRow(model: model, isSelected: model.id == state.currentModel?.id)
-                            .contentShape(Rectangle())
-                            .onTapGesture {
+                VStack(alignment: .leading, spacing: DS.Spacing.sm) {
+                    if state.visibleModels.isEmpty {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("No connected models")
+                                .font(DS.body(11, weight: .semibold))
+                                .foregroundStyle(DS.Colors.textPrimary)
+                            Text("Authenticate a provider in Settings → Accounts, then reconnect.")
+                                .font(DS.body(10))
+                                .foregroundStyle(DS.Colors.textTertiary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        .padding(8)
+                    } else {
+                        ForEach(state.visibleModelGroups) { group in
+                            ProviderGroupView(group: group) { model in
                                 Task { await state.setModel(model) }
                                 withAnimation { isExpanded = false }
+                            } onHide: { model in
+                                state.hideModel(model)
                             }
+                        }
+                    }
+
+                    if !state.hiddenModels.isEmpty {
+                        Divider().background(DS.Colors.border)
+                        DisclosureGroup {
+                            VStack(spacing: 2) {
+                                ForEach(state.hiddenModels, id: \.modelKey) { model in
+                                    HiddenModelRow(model: model) {
+                                        state.showModel(model)
+                                    }
+                                }
+                            }
+                            .padding(.top, 4)
+                        } label: {
+                            Text("Hidden models (\(state.hiddenModels.count))")
+                                .font(DS.mono(10, weight: .medium))
+                                .foregroundStyle(DS.Colors.textTertiary)
+                        }
+                    }
+
+                    if state.disconnectedModelCount > 0 {
+                        Text("\(state.disconnectedModelCount) model\(state.disconnectedModelCount == 1 ? "" : "s") hidden because provider is not connected")
+                            .font(DS.body(10))
+                            .foregroundStyle(DS.Colors.textTertiary)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                 }
                 .padding(6)
                 .background(DS.Colors.surfaceElevated)
-                .clipShape(RoundedRectangle(cornerRadius: DS.Radius.sm))
-                .overlay(RoundedRectangle(cornerRadius: DS.Radius.sm).stroke(DS.Colors.border, lineWidth: 1))
+                .clipShape(RoundedRectangle(cornerRadius: DS.Radius.md))
+                .overlay(RoundedRectangle(cornerRadius: DS.Radius.md).stroke(DS.Colors.border, lineWidth: 1))
                 .transition(.scale(scale: 0.95, anchor: .top).combined(with: .opacity))
             }
         }
@@ -154,44 +192,126 @@ struct ModelSectionView: View {
 
 struct ProviderDot: View {
     let provider: String
-    var color: Color {
-        switch provider.lowercased() {
-        case let p where p.contains("anthropic"): return Color(hex: "#D97706")
-        case let p where p.contains("google"), let p where p.contains("gemini"): return Color(hex: "#4285F4")
-        case let p where p.contains("openai"): return Color(hex: "#10A37F")
-        case let p where p.contains("github"): return Color(hex: "#8B5CF6")
-        default: return DS.Colors.textSecondary
-        }
-    }
+    var color: Color { DS.Colors.accent }
 
     var body: some View {
-        Circle().fill(color).frame(width: 8, height: 8)
-            .shadow(color: color.opacity(0.5), radius: 3)
+        Circle()
+            .fill(color.opacity(0.9))
+            .frame(width: 7, height: 7)
+            .overlay(Circle().stroke(DS.Colors.borderAccent, lineWidth: 0.5))
+    }
+}
+
+struct ProviderGroupView: View {
+    @EnvironmentObject var state: AppState
+    let group: ModelProviderGroup
+    let onSelect: (AgentModel) -> Void
+    let onHide: (AgentModel) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 6) {
+                ProviderDot(provider: group.provider)
+                Text(group.provider)
+                    .font(DS.mono(10, weight: .semibold))
+                    .foregroundStyle(DS.Colors.textSecondary)
+                    .lineLimit(1)
+                Spacer()
+                Text("\(group.models.count)")
+                    .font(DS.mono(9, weight: .medium))
+                    .foregroundStyle(DS.Colors.textTertiary)
+            }
+            .padding(.horizontal, 6)
+
+            VStack(spacing: 2) {
+                ForEach(group.models, id: \.modelKey) { model in
+                    ModelRow(
+                        model: model,
+                        isSelected: model.modelKey == state.currentModel?.modelKey,
+                        onSelect: { onSelect(model) },
+                        onHide: { onHide(model) }
+                    )
+                }
+            }
+        }
     }
 }
 
 struct ModelRow: View {
     let model: AgentModel
     let isSelected: Bool
+    let onSelect: () -> Void
+    let onHide: () -> Void
     @State private var isHovered = false
 
     var body: some View {
         HStack(spacing: 8) {
-            ProviderDot(provider: model.provider)
-            Text(model.name)
-                .font(DS.body(11))
-                .foregroundStyle(isSelected ? DS.Colors.accent : DS.Colors.textSecondary)
-                .lineLimit(1)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(model.name)
+                    .font(DS.body(11, weight: isSelected ? .semibold : .regular))
+                    .foregroundStyle(isSelected ? DS.Colors.textPrimary : DS.Colors.textSecondary)
+                    .lineLimit(1)
+                Text(model.provider)
+                    .font(DS.mono(9))
+                    .foregroundStyle(DS.Colors.textTertiary)
+                    .lineLimit(1)
+            }
             Spacer()
             if isSelected {
-                Image(systemName: "checkmark").font(.system(size: 9, weight: .bold))
+                Image(systemName: "checkmark")
+                    .font(.system(size: 9, weight: .bold))
                     .foregroundStyle(DS.Colors.accent)
+            } else if isHovered {
+                Button(action: onHide) {
+                    Image(systemName: "eye.slash")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(DS.Colors.textTertiary)
+                        .frame(width: 18, height: 18)
+                }
+                .buttonStyle(.plain)
+                .help("Hide model from selector")
             }
         }
-        .padding(.horizontal, 8).padding(.vertical, 5)
-        .background(isSelected ? DS.Colors.accentDim : isHovered ? DS.Colors.border.opacity(0.5) : .clear)
-        .clipShape(RoundedRectangle(cornerRadius: 5))
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .background(isSelected ? DS.Colors.accentDim : isHovered ? DS.Colors.border.opacity(0.45) : .clear)
+        .clipShape(RoundedRectangle(cornerRadius: 6))
+        .contentShape(Rectangle())
+        .onTapGesture(perform: onSelect)
         .onHover { isHovered = $0 }
+    }
+}
+
+struct HiddenModelRow: View {
+    let model: AgentModel
+    let onShow: () -> Void
+
+    var body: some View {
+        HStack(spacing: 8) {
+            VStack(alignment: .leading, spacing: 1) {
+                Text(model.name)
+                    .font(DS.body(10))
+                    .foregroundStyle(DS.Colors.textTertiary)
+                    .lineLimit(1)
+                Text(model.provider)
+                    .font(DS.mono(9))
+                    .foregroundStyle(DS.Colors.textTertiary.opacity(0.8))
+                    .lineLimit(1)
+            }
+            Spacer()
+            Button(action: onShow) {
+                Image(systemName: "eye")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(DS.Colors.textSecondary)
+                    .frame(width: 18, height: 18)
+            }
+            .buttonStyle(.plain)
+            .help("Show model in selector")
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
+        .background(DS.Colors.background.opacity(0.35))
+        .clipShape(RoundedRectangle(cornerRadius: 6))
     }
 }
 
@@ -336,9 +456,9 @@ struct CommandRow: View {
     var body: some View {
         HStack(spacing: 6) {
             Image(systemName: icon)
-                .font(.system(size: 9))
+                .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(color)
-                .frame(width: 14)
+                .frame(width: 18)
             VStack(alignment: .leading, spacing: 0) {
                 Text("/\(cmd.name)")
                     .font(DS.mono(10, weight: .medium))
@@ -417,11 +537,11 @@ struct MCPServerRow: View {
         VStack(spacing: 0) {
             HStack(spacing: 8) {
                 ZStack {
-                    RoundedRectangle(cornerRadius: 5)
+                    RoundedRectangle(cornerRadius: 6)
                         .fill(color.opacity(0.15))
-                        .frame(width: 22, height: 22)
+                        .frame(width: 28, height: 28)
                     Image(systemName: icon)
-                        .font(.system(size: 10, weight: .medium))
+                        .font(.system(size: 14, weight: .medium))
                         .foregroundStyle(color)
                 }
                 VStack(alignment: .leading, spacing: 1) {
@@ -456,11 +576,13 @@ struct SidebarActionsView: View {
     @State private var showAppSettings = false
 
     var body: some View {
-        HStack(spacing: DS.Spacing.sm) {
+        HStack(spacing: 0) {
             IconButton(icon: "plus.square", color: DS.Colors.textSecondary, hoverColor: DS.Colors.accent) {
                 Task { await state.startNewSession() }
             }
             .help("New Session")
+
+            Spacer(minLength: 0)
 
             IconButton(icon: "arrow.clockwise", color: DS.Colors.textSecondary, hoverColor: DS.Colors.purple) {
                 Task {
@@ -469,6 +591,8 @@ struct SidebarActionsView: View {
                 }
             }
             .help("Refresh")
+
+            Spacer(minLength: 0)
 
             IconButton(icon: state.isCheckingForUpdates ? "hourglass" : "arrow.down.app", color: DS.Colors.textSecondary, hoverColor: DS.Colors.green) {
                 Task { await state.updateFromGitHub() }
@@ -486,6 +610,8 @@ struct SidebarActionsView: View {
                 AppSettingsView()
                     .environmentObject(state)
             }
+
+            Spacer(minLength: 0)
 
             IconButton(icon: "archivebox", color: DS.Colors.textSecondary, hoverColor: DS.Colors.yellow) {
                 Task { await state.compact() }

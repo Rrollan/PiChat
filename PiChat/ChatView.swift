@@ -1,10 +1,12 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 // MARK: - Chat View
 
 struct ChatView: View {
     @EnvironmentObject var state: AppState
     @Namespace private var bottomAnchor
+    @State private var isAttachmentDropTargeted = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -15,7 +17,7 @@ struct ChatView: View {
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(spacing: 0) {
-                        if state.messages.isEmpty && !state.isStreaming {
+                        if state.messages.isEmpty && !state.isStreaming && !state.isWaitingForResponse {
                             WelcomeView()
                         } else {
                             ForEach(state.messages) { msg in
@@ -33,12 +35,17 @@ struct ChatView: View {
 
                         Color.clear.frame(height: 1).id("bottom")
                     }
-                    .padding(.vertical, DS.Spacing.lg)
+                    .frame(maxWidth: 860)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, DS.Spacing.xl)
                 }
                 .onChange(of: state.messages.count) {
                     withAnimation { proxy.scrollTo("bottom") }
                 }
                 .onChange(of: state.messages.last?.text) {
+                    proxy.scrollTo("bottom")
+                }
+                .onChange(of: state.isWaitingForResponse) {
                     proxy.scrollTo("bottom")
                 }
             }
@@ -47,6 +54,103 @@ struct ChatView: View {
             InputAreaView()
         }
         .background(DS.Colors.background)
+        .onDrop(of: AttachmentIngress.acceptedAttachmentTypes, isTargeted: $isAttachmentDropTargeted) { providers in
+            handleAttachmentDrop(providers)
+            return true
+        }
+        .overlay {
+            if isAttachmentDropTargeted {
+                ChatAttachmentDropOverlay()
+                    .transition(.opacity.combined(with: .scale(scale: 0.97)))
+                    .allowsHitTesting(false)
+            }
+        }
+        .animation(.spring(response: 0.28, dampingFraction: 0.82), value: isAttachmentDropTargeted)
+    }
+
+    private func handleAttachmentDrop(_ providers: [NSItemProvider]) {
+        AttachmentIngress.loadAttachmentURLs(from: providers) { urls in
+            guard !urls.isEmpty else {
+                state.show(notification: AppNotification(message: "No supported files found", type: .warning))
+                return
+            }
+            for url in urls { state.addFile(url: url) }
+            state.show(notification: AppNotification(message: "Dropped files: \(urls.count)", type: .success))
+        }
+    }
+}
+
+struct ChatAttachmentDropOverlay: View {
+    var body: some View {
+        ZStack {
+            DS.Colors.background.opacity(0.58)
+                .background(.ultraThinMaterial)
+
+            VStack(spacing: DS.Spacing.lg) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: DS.Radius.xl)
+                        .fill(DS.Colors.accentDim)
+                        .frame(width: 92, height: 92)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: DS.Radius.xl)
+                                .stroke(DS.Colors.borderAccent, lineWidth: 1)
+                        )
+
+                    Image(systemName: "tray.and.arrow.down.fill")
+                        .font(.system(size: 38, weight: .semibold))
+                        .foregroundStyle(DS.Colors.textPrimary)
+                }
+
+                VStack(spacing: 6) {
+                    Text("Drop files into chat")
+                        .font(DS.display(24, weight: .semibold))
+                        .foregroundStyle(DS.Colors.textPrimary)
+                    Text("Images become visual attachments. Other files are added as cards below.")
+                        .font(DS.body(13))
+                        .foregroundStyle(DS.Colors.textSecondary)
+                        .multilineTextAlignment(.center)
+                }
+
+                HStack(spacing: DS.Spacing.sm) {
+                    DropHintPill(icon: "photo", text: "PNG / JPG / GIF")
+                    DropHintPill(icon: "doc", text: "Files")
+                    DropHintPill(icon: "doc.on.clipboard", text: "Finder copy")
+                }
+            }
+            .padding(.horizontal, 34)
+            .padding(.vertical, 30)
+            .background(
+                RoundedRectangle(cornerRadius: 28)
+                    .fill(DS.Colors.surfaceElevated.opacity(0.94))
+                    .shadow(color: .black.opacity(0.22), radius: 34, x: 0, y: 22)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 28)
+                    .stroke(style: StrokeStyle(lineWidth: 1.5, dash: [9, 7]))
+                    .foregroundStyle(DS.Colors.borderAccent)
+            )
+            .padding(42)
+        }
+    }
+}
+
+private struct DropHintPill: View {
+    let icon: String
+    let text: String
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: icon)
+                .font(.system(size: 11, weight: .semibold))
+            Text(text)
+                .font(DS.mono(10, weight: .semibold))
+        }
+        .foregroundStyle(DS.Colors.textSecondary)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(DS.Colors.background.opacity(0.72))
+        .clipShape(Capsule())
+        .overlay(Capsule().stroke(DS.Colors.border, lineWidth: 1))
     }
 }
 
@@ -126,8 +230,8 @@ struct ChatHeaderView: View {
         }
         .padding(.horizontal, DS.Spacing.xl)
         .padding(.vertical, DS.Spacing.md)
-        .background(DS.Colors.surface)
-        .overlay(Rectangle().frame(height: 1).foregroundStyle(DS.Colors.border), alignment: .bottom)
+        .background(DS.Colors.background.opacity(0.94))
+        .overlay(Rectangle().frame(height: 1).foregroundStyle(DS.Colors.border.opacity(0.75)), alignment: .bottom)
     }
 
     private func selectNewFolder() {
@@ -160,35 +264,32 @@ struct WelcomeView: View {
     ]
 
     var body: some View {
-        VStack(spacing: DS.Spacing.xxxl) {
-            Spacer(minLength: 60)
+        VStack(spacing: DS.Spacing.xl) {
+            Spacer(minLength: 44)
 
-            // Logo
-            VStack(spacing: DS.Spacing.xs) {
+            VStack(spacing: 8) {
                 ThemedLogo()
-                    .frame(width: 240, height: 240)
-                    .opacity(0.9)
-                    .padding(.bottom, -45)
+                    .frame(width: 210, height: 210)
+                    .opacity(0.92)
+                    .padding(.bottom, -40)
 
-                VStack(spacing: 8) {
-                    Text("PiChat")
-                        .font(.system(size: 28, weight: .semibold, design: .serif))
-                        .foregroundStyle(DS.Colors.textPrimary)
-                    Text("Powered by \(state.currentModel?.name ?? "pi agent")")
-                        .font(DS.mono(12))
-                        .foregroundStyle(DS.Colors.textSecondary)
-                }
+                Text("PiChat")
+                    .font(.system(size: 30, weight: .semibold, design: .serif))
+                    .foregroundStyle(DS.Colors.textPrimary)
+
+                Text("Powered by \(state.currentModel?.name ?? "pi agent")")
+                    .font(DS.mono(12))
+                    .foregroundStyle(DS.Colors.textSecondary)
             }
 
-            // Suggestion grid
             LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: DS.Spacing.sm) {
                 ForEach(suggestions, id: \.1) { icon, title, desc in
                     SuggestionCard(icon: icon, title: title, description: desc)
                 }
             }
-            .frame(maxWidth: 480)
+            .frame(maxWidth: 560)
 
-            Spacer(minLength: 40)
+            Spacer(minLength: 44)
         }
         .frame(maxWidth: .infinity)
     }
@@ -207,7 +308,7 @@ struct SuggestionCard: View {
         } label: {
             VStack(alignment: .leading, spacing: 6) {
                 Image(systemName: icon)
-                    .font(.system(size: 16, weight: .medium))
+                    .font(.system(size: 18, weight: .medium))
                     .foregroundStyle(DS.Colors.accent)
                 Text(title)
                     .font(DS.body(13, weight: .semibold))
@@ -217,13 +318,13 @@ struct SuggestionCard: View {
                     .foregroundStyle(DS.Colors.textSecondary)
                     .lineLimit(2)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(maxWidth: .infinity, minHeight: 76, alignment: .leading)
             .padding(DS.Spacing.md)
-            .background(isHovered ? DS.Colors.accentDim : DS.Colors.surface)
-            .clipShape(RoundedRectangle(cornerRadius: DS.Radius.md))
+            .background(isHovered ? DS.Colors.surfaceElevated : DS.Colors.surface)
+            .clipShape(RoundedRectangle(cornerRadius: DS.Radius.lg))
             .overlay(
-                RoundedRectangle(cornerRadius: DS.Radius.md)
-                    .stroke(isHovered ? DS.Colors.accent.opacity(0.4) : DS.Colors.border, lineWidth: 1)
+                RoundedRectangle(cornerRadius: DS.Radius.lg)
+                    .stroke(isHovered ? DS.Colors.borderAccent : DS.Colors.border, lineWidth: 1)
             )
             .scaleEffect(isHovered ? 1.01 : 1)
         }
@@ -296,6 +397,23 @@ struct UserMessageView: View {
 
 // MARK: - Assistant Message
 
+struct WaitingAssistantMessageView: View {
+    var body: some View {
+        HStack(alignment: .top, spacing: DS.Spacing.md) {
+            AssistantReplyAvatar()
+                .frame(width: 42, height: 42)
+                .padding(.top, -2)
+
+            PiThinkingIndicator(thinkingText: "")
+                .padding(.vertical, 6)
+
+            Spacer(minLength: 60)
+        }
+        .padding(.horizontal, DS.Spacing.xl)
+        .padding(.vertical, DS.Spacing.xs)
+    }
+}
+
 struct AssistantMessageView: View {
     let message: ChatMessage
     @State private var showThinking = false
@@ -304,14 +422,20 @@ struct AssistantMessageView: View {
         HStack(alignment: .top, spacing: DS.Spacing.md) {
             // Avatar
             AssistantReplyAvatar()
-                .frame(width: 28, height: 28)
-                .padding(.top, 2)
+                .frame(width: 42, height: 42)
+                .padding(.top, 0)
 
             VStack(alignment: .leading, spacing: DS.Spacing.sm) {
 
-                // Thinking block
-                if !message.thinkingText.isEmpty {
-                    ThinkingBlockView(text: message.thinkingText)
+                // Thinking UX:
+                // - while streaming: always show the animated thinking header immediately;
+                //   real reasoning appears inside as soon as the provider sends thinking_delta.
+                // - after completion: show a collapsed disclosure with the real reasoning.
+                if message.isStreaming {
+                    PiThinkingIndicator(thinkingText: message.thinkingText)
+                        .padding(.vertical, 8)
+                } else if !message.thinkingText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    CompletedThinkingBlock(text: message.thinkingText)
                 }
 
                 // Tool calls (inline)
@@ -321,14 +445,7 @@ struct AssistantMessageView: View {
 
                 // Main text
                 if !message.text.isEmpty {
-                    if message.isStreaming && message.text.isEmpty {
-                        TypingIndicator()
-                            .padding(.vertical, 8)
-                    } else {
-                        MarkdownTextView(text: message.text, isStreaming: message.isStreaming)
-                    }
-                } else if message.isStreaming {
-                    TypingIndicator().padding(.vertical, 8)
+                    MarkdownTextView(text: message.text, isStreaming: message.isStreaming)
                 }
 
                 // Timestamp
@@ -352,21 +469,29 @@ struct AssistantReplyAvatar: View {
 
     var body: some View {
         ZStack {
-            Image(systemName: "sparkles")
-                .font(.system(size: 18, weight: .semibold))
-                .foregroundStyle(DS.Colors.textPrimary)
-                .scaleEffect(scale)
-                .shadow(color: DS.Colors.textSecondary.opacity(glow * 0.22), radius: 6)
-                .animation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true), value: scale)
+            RoundedRectangle(cornerRadius: 4)
+                .fill(DS.Colors.surfaceElevated.opacity(0.08))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 4)
+                        .stroke(DS.Colors.borderAccent.opacity(0.24), lineWidth: 0.6)
+                )
+                .frame(width: 32, height: 32)
+            PiChatLogo(style: .mark314)
+                .scaleEffect(1.55)
+                .frame(width: 32, height: 32)
+                .clipped()
         }
-        .onAppear {
-            scale = 1.08
-            glow = 0.9
-        }
-        .onDisappear {
-            scale = 1.0
-            glow = 0.55
-        }
+            .scaleEffect(scale)
+            .shadow(color: DS.Colors.textSecondary.opacity(glow * 0.18), radius: 5)
+            .animation(.easeInOut(duration: 1.15).repeatForever(autoreverses: true), value: scale)
+            .onAppear {
+                scale = 1.03
+                glow = 0.8
+            }
+            .onDisappear {
+                scale = 1.0
+                glow = 0.55
+            }
     }
 }
 
@@ -508,26 +633,198 @@ struct ToolCallCardView: View {
 
 // MARK: - Markdown Text (simplified)
 
+struct PiThinkingIndicator: View {
+    let thinkingText: String
+    @State private var phase = false
+    @State private var elapsed = 0
+    private let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: DS.Spacing.sm) {
+            HStack(spacing: DS.Spacing.sm) {
+                MiniSpinner()
+                Text("Pi is thinking")
+                    .font(DS.body(14, weight: .medium))
+                    .foregroundStyle(shimmerStyle)
+                    .animation(.linear(duration: 5.0).repeatForever(autoreverses: false), value: phase)
+                Text("\(elapsed)s")
+                    .font(DS.mono(11))
+                    .foregroundStyle(DS.Colors.textTertiary)
+            }
+
+
+        }
+        .onAppear { phase = true }
+        .onReceive(timer) { _ in elapsed += 1 }
+        .accessibilityLabel("Pi is thinking")
+    }
+
+    private var shimmerStyle: LinearGradient {
+        LinearGradient(
+            stops: [
+                .init(color: DS.Colors.textTertiary.opacity(0.48), location: 0.0),
+                .init(color: DS.Colors.textSecondary.opacity(0.75), location: 0.35),
+                .init(color: DS.Colors.textPrimary, location: 0.50),
+                .init(color: DS.Colors.textSecondary.opacity(0.75), location: 0.65),
+                .init(color: DS.Colors.textTertiary.opacity(0.48), location: 1.0)
+            ],
+            startPoint: UnitPoint(x: phase ? -1.4 : 1.8, y: 0.5),
+            endPoint: UnitPoint(x: phase ? -0.1 : 3.1, y: 0.5)
+        )
+    }
+}
+
+struct MiniSpinner: View {
+    @State private var rotation = 0.0
+
+    var body: some View {
+        Circle()
+            .trim(from: 0.18, to: 0.86)
+            .stroke(DS.Colors.textSecondary.opacity(0.78), style: StrokeStyle(lineWidth: 1.7, lineCap: .round))
+            .frame(width: 14, height: 14)
+            .rotationEffect(.degrees(rotation))
+            .onAppear {
+                withAnimation(.linear(duration: 0.9).repeatForever(autoreverses: false)) {
+                    rotation = 360
+                }
+            }
+    }
+}
+
+struct ThinkingPreviewCard: View {
+    let thinkingText: String
+    @State private var offset: CGFloat = 0
+
+    private var preview: String {
+        thinkingText.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    var body: some View {
+        ZStack {
+            Text(preview)
+                .font(DS.body(11))
+                .foregroundStyle(DS.Colors.textSecondary)
+                .lineSpacing(4)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .offset(y: offset)
+                .padding(DS.Spacing.md)
+
+            VStack {
+                LinearGradient(colors: [DS.Colors.surface.opacity(0.95), .clear], startPoint: .top, endPoint: .bottom)
+                    .frame(height: 34)
+                Spacer()
+                LinearGradient(colors: [.clear, DS.Colors.surface.opacity(0.95)], startPoint: .top, endPoint: .bottom)
+                    .frame(height: 34)
+            }
+            .allowsHitTesting(false)
+        }
+        .frame(width: 360, height: 118)
+        .background(DS.Colors.surface.opacity(0.75))
+        .clipShape(RoundedRectangle(cornerRadius: DS.Radius.md))
+        .overlay(RoundedRectangle(cornerRadius: DS.Radius.md).stroke(DS.Colors.border.opacity(0.7), lineWidth: 1))
+        .clipped()
+        .onAppear { startScroll() }
+        .onChange(of: thinkingText) { _, _ in startScroll() }
+    }
+
+    private func startScroll() {
+        offset = 34
+        withAnimation(.linear(duration: 5.5).repeatForever(autoreverses: false)) {
+            offset = -78
+        }
+    }
+}
+
+struct CompletedThinkingBlock: View {
+    let text: String
+    @State private var isExpanded = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Button {
+                withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) {
+                    isExpanded.toggle()
+                }
+            } label: {
+                HStack(spacing: DS.Spacing.sm) {
+                    Image(systemName: "brain.head.profile")
+                        .font(.system(size: 13, weight: .medium))
+                    Text("Thinking")
+                        .font(DS.body(13, weight: .semibold))
+                    Spacer()
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 10, weight: .semibold))
+                        .rotationEffect(.degrees(isExpanded ? 180 : 0))
+                }
+                .foregroundStyle(DS.Colors.textSecondary)
+                .padding(.horizontal, DS.Spacing.md)
+                .padding(.vertical, 9)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            if isExpanded {
+                Text(text)
+                    .font(DS.body(12))
+                    .foregroundStyle(DS.Colors.textSecondary)
+                    .lineSpacing(4)
+                    .textSelection(.enabled)
+                    .padding(.horizontal, DS.Spacing.md)
+                    .padding(.bottom, DS.Spacing.md)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+        }
+        .frame(maxWidth: 720, alignment: .leading)
+        .background(DS.Colors.surface.opacity(0.78))
+        .clipShape(RoundedRectangle(cornerRadius: DS.Radius.md))
+        .overlay(RoundedRectangle(cornerRadius: DS.Radius.md).stroke(DS.Colors.border.opacity(0.75), lineWidth: 1))
+    }
+}
+
 struct MarkdownTextView: View {
     let text: String
     let isStreaming: Bool
+    @State private var shinePhase = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 5) {
             Text(attributedText)
                 .font(DS.body(14))
-                .foregroundStyle(DS.Colors.textPrimary)
+                .foregroundStyle(textStyle)
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
+                .onAppear { startShineIfNeeded() }
+                .onChange(of: isStreaming) { _, _ in startShineIfNeeded() }
 
             if isStreaming {
-                // Streaming cursor blink
-                RoundedRectangle(cornerRadius: 1)
-                    .fill(DS.Colors.accent)
-                    .frame(width: 2, height: 14)
-                    .opacity(1)
-                    .animation(.easeInOut(duration: 0.5).repeatForever(), value: isStreaming)
+                ShiningText(text: "responding", font: DS.mono(10, weight: .medium), duration: 1.8)
+                    .padding(.top, 1)
             }
+        }
+    }
+
+    private var textStyle: AnyShapeStyle {
+        guard isStreaming else { return AnyShapeStyle(DS.Colors.textPrimary) }
+        return AnyShapeStyle(
+            LinearGradient(
+                stops: [
+                    .init(color: DS.Colors.textSecondary.opacity(0.72), location: 0.0),
+                    .init(color: DS.Colors.textPrimary, location: 0.38),
+                    .init(color: DS.Colors.textPrimary, location: 0.50),
+                    .init(color: DS.Colors.textSecondary.opacity(0.72), location: 0.76),
+                    .init(color: DS.Colors.textSecondary.opacity(0.72), location: 1.0)
+                ],
+                startPoint: UnitPoint(x: shinePhase ? -0.85 : 1.25, y: 0.5),
+                endPoint: UnitPoint(x: shinePhase ? 0.25 : 2.35, y: 0.5)
+            )
+        )
+    }
+
+    private func startShineIfNeeded() {
+        guard isStreaming else { return }
+        shinePhase = false
+        withAnimation(.linear(duration: 2.0).repeatForever(autoreverses: false)) {
+            shinePhase = true
         }
     }
 

@@ -7,54 +7,54 @@ enum DS {
 
     // MARK: Colors
     enum Colors {
-        // Adaptive light/dark palette
-        static let background      = Color(lightHex: "#FFFFFF", darkHex: "#101114")
-        static let surface         = Color(lightHex: "#F9F9F9", darkHex: "#16181D")
-        static let surfaceElevated = Color(lightHex: "#F3F3F3", darkHex: "#1E2128")
-        static let border          = Color(lightHex: "#EAEAEA", darkHex: "#2A2F39")
-        static let borderAccent    = Color(lightHex: "#D0D0D0", darkHex: "#3A404D")
+        // Claude-inspired monochrome palette: quiet surfaces, high contrast text, no color accent bias.
+        static let background      = Color(lightHex: "#F7F6F2", darkHex: "#20201D")
+        static let surface         = Color(lightHex: "#EEEDE8", darkHex: "#282824")
+        static let surfaceElevated = Color(lightHex: "#FFFFFF", darkHex: "#30302B")
+        static let border          = Color(lightHex: "#DDDAD1", darkHex: "#434239")
+        static let borderAccent    = Color(lightHex: "#C6C1B6", darkHex: "#5A584E")
 
-        static let accent          = Color(lightHex: "#000000", darkHex: "#F5F7FA")
-        static let accentDim       = Color(lightHex: "#000000", darkHex: "#FFFFFF").opacity(0.08)
-        static let purple          = Color(hex: "#7C66DC")
-        static let purpleDim       = Color(hex: "#7C66DC").opacity(0.15)
-        static let green           = Color(hex: "#4D8B55")
-        static let red             = Color(hex: "#C65345")
-        static let yellow          = Color(hex: "#D49A36")
-        static let orange          = Color(hex: "#D97757")
+        static let accent          = Color(lightHex: "#2B2924", darkHex: "#D8D3C7")
+        static let accentDim       = Color(lightHex: "#2B2924", darkHex: "#D8D3C7").opacity(0.09)
+        static let purple          = Color(lightHex: "#68645B", darkHex: "#BDB7AA")
+        static let purpleDim       = Color(lightHex: "#2B2924", darkHex: "#D8D3C7").opacity(0.09)
+        static let green           = Color(lightHex: "#3F6B4A", darkHex: "#8DBA97")
+        static let red             = Color(lightHex: "#A2433B", darkHex: "#E1847B")
+        static let yellow          = Color(lightHex: "#8A6A2E", darkHex: "#D6BF79")
+        static let orange          = Color(lightHex: "#6B6256", darkHex: "#C7BEB1")
 
-        static let textPrimary     = Color(lightHex: "#111111", darkHex: "#E8ECF2")
-        static let textSecondary   = Color(lightHex: "#666666", darkHex: "#B5BCC9")
-        static let textTertiary    = Color(lightHex: "#999999", darkHex: "#8891A1")
+        static let textPrimary     = Color(lightHex: "#25231F", darkHex: "#EEEAE0")
+        static let textSecondary   = Color(lightHex: "#6B665D", darkHex: "#C2BCB0")
+        static let textTertiary    = Color(lightHex: "#969085", darkHex: "#969084")
         static let textAccent      = accent
 
-        static let userBubble      = Color(lightHex: "#F3F3F3", darkHex: "#20242C")
-        static let assistantBubble = Color(lightHex: "#FFFFFF", darkHex: "#151922")
-        static let toolBubble      = Color(lightHex: "#F9F9F9", darkHex: "#181C24")
+        static let userBubble      = Color(lightHex: "#E9E6DE", darkHex: "#38372F")
+        static let assistantBubble = Color(lightHex: "#F7F6F2", darkHex: "#20201D")
+        static let toolBubble      = Color(lightHex: "#EFEEE9", darkHex: "#2D2D28")
 
-        // Glow (soft shadow colors)
-        static let glowBlue    = Color(lightHex: "#000000", darkHex: "#4C7DFF").opacity(0.12)
-        static let glowPurple  = Color(lightHex: "#000000", darkHex: "#7C66DC").opacity(0.12)
+        // Glow (subtle monochrome shadows)
+        static let glowBlue    = Color(lightHex: "#000000", darkHex: "#FFFFFF").opacity(0.08)
+        static let glowPurple  = Color(lightHex: "#000000", darkHex: "#FFFFFF").opacity(0.08)
     }
 
     // MARK: Gradients
     enum Gradients {
         static let accentLinear = LinearGradient(
-            colors: [Color(hex: "#333333"), Color(hex: "#000000")],
-            startPoint: .leading, endPoint: .trailing
+            colors: [Color(lightHex: "#3B3932", darkHex: "#6A675D"), Color(lightHex: "#24221E", darkHex: "#545147")],
+            startPoint: .topLeading, endPoint: .bottomTrailing
         )
         static let backgroundRadial = RadialGradient(
-            colors: [Color(hex: "#FFFFFF"), Color(hex: "#F9F9F9")],
-            center: .top, startRadius: 0, endRadius: 600
+            colors: [Color(lightHex: "#FFFFFF", darkHex: "#2A2A26"), Color(lightHex: "#F7F6F2", darkHex: "#20201D")],
+            center: .top, startRadius: 0, endRadius: 720
         )
         static let glowTop = LinearGradient(
-            colors: [Color.black.opacity(0.02), .clear],
+            colors: [Color.black.opacity(0.025), .clear],
             startPoint: .top, endPoint: .bottom
         )
         static let userBubble = LinearGradient(
             colors: [
-                Color(lightHex: "#F3F3F3", darkHex: "#252A33"),
-                Color(lightHex: "#ECECEC", darkHex: "#1E232C")
+                Color(lightHex: "#ECE9E1", darkHex: "#3A3932"),
+                Color(lightHex: "#E3DFD5", darkHex: "#32312C")
             ],
             startPoint: .topLeading, endPoint: .bottomTrailing
         )
@@ -186,6 +186,38 @@ struct PulsingDot: View {
 }
 
 // MARK: - Shimmer / Loading
+struct ShiningText: View {
+    let text: String
+    var font: Font = DS.body(14)
+    var duration: Double = 2.0
+    @State private var phase = false
+
+    var body: some View {
+        Text(text)
+            .font(font)
+            .foregroundStyle(
+                LinearGradient(
+                    stops: [
+                        .init(color: DS.Colors.textSecondary.opacity(0.55), location: 0.0),
+                        .init(color: DS.Colors.textPrimary, location: 0.35),
+                        .init(color: DS.Colors.textPrimary, location: 0.50),
+                        .init(color: DS.Colors.textSecondary.opacity(0.55), location: 0.75),
+                        .init(color: DS.Colors.textSecondary.opacity(0.55), location: 1.0)
+                    ],
+                    startPoint: UnitPoint(x: phase ? -1.0 : 1.35, y: 0.5),
+                    endPoint: UnitPoint(x: phase ? 0.2 : 2.55, y: 0.5)
+                )
+            )
+            .onAppear {
+                phase = false
+                withAnimation(.linear(duration: duration).repeatForever(autoreverses: false)) {
+                    phase = true
+                }
+            }
+            .accessibilityLabel(text)
+    }
+}
+
 struct ShimmerView: View {
     @State private var phase: CGFloat = -1
 
@@ -194,7 +226,7 @@ struct ShimmerView: View {
             let gradient = LinearGradient(
                 stops: [
                     .init(color: DS.Colors.border.opacity(0.5), location: 0),
-                    .init(color: DS.Colors.accent.opacity(0.15), location: 0.5),
+                    .init(color: DS.Colors.accent.opacity(0.18), location: 0.5),
                     .init(color: DS.Colors.border.opacity(0.5), location: 1)
                 ],
                 startPoint: .init(x: phase, y: 0),
@@ -261,7 +293,7 @@ struct IconButton: View {
     var label: String? = nil
     var color: Color = DS.Colors.textSecondary
     var hoverColor: Color = DS.Colors.accent
-    var size: CGFloat = 15
+    var size: CGFloat = 17
     let action: () -> Void
 
     @State private var isHovered = false
@@ -276,8 +308,9 @@ struct IconButton: View {
                 }
             }
             .foregroundStyle(isHovered ? hoverColor : color)
-            .padding(.horizontal, label != nil ? 8 : 6)
-            .padding(.vertical, 5)
+            .frame(minWidth: label != nil ? 0 : 30, minHeight: 30)
+            .padding(.horizontal, label != nil ? 8 : 4)
+            .padding(.vertical, label != nil ? 6 : 4)
             .background(isHovered ? hoverColor.opacity(0.1) : .clear)
             .clipShape(RoundedRectangle(cornerRadius: 6))
         }
@@ -368,7 +401,7 @@ struct ContextBar: View {
 struct AnimatedBorderModifier: ViewModifier {
     @State private var rotation: Double = 0
     var isActive: Bool = true
-    var colors: [Color] = [DS.Colors.accent, DS.Colors.purple, DS.Colors.accent]
+    var colors: [Color] = [DS.Colors.borderAccent, DS.Colors.accent.opacity(0.65), DS.Colors.borderAccent]
     var lineWidth: CGFloat = 1
 
     func body(content: Content) -> some View {

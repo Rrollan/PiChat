@@ -99,7 +99,7 @@ struct AgentModel: Decodable, Identifiable, Equatable {
     let reasoning: Bool?
     let cost: ModelCost?
 
-    static func == (lhs: AgentModel, rhs: AgentModel) -> Bool { lhs.id == rhs.id }
+    static func == (lhs: AgentModel, rhs: AgentModel) -> Bool { lhs.id == rhs.id && lhs.provider == rhs.provider }
 }
 
 struct ModelCost: Decodable {

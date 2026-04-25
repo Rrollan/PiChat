@@ -148,6 +148,7 @@ struct AppSettingsView: View {
                 case .accounts:
                     subscriptionAuthCard
                     accountCard
+                    modelVisibilityCard
                     customModelsCard
                 case .project:
                     agentActionsCard
@@ -200,9 +201,17 @@ struct AppSettingsView: View {
     private var modelCard: some View {
         settingsCard(title: "Model", subtitle: "Current model and thinking level") {
             Menu {
-                ForEach(state.availableModels) { model in
-                    Button("\(model.name) · \(model.provider)") {
-                        Task { await state.setModel(model) }
+                if state.visibleModelGroups.isEmpty {
+                    Text("No connected models")
+                } else {
+                    ForEach(state.visibleModelGroups) { group in
+                        Section(group.provider) {
+                            ForEach(group.models, id: \.modelKey) { model in
+                                Button("\(model.name)") {
+                                    Task { await state.setModel(model) }
+                                }
+                            }
+                        }
                     }
                 }
             } label: {
@@ -236,6 +245,18 @@ struct AppSettingsView: View {
             .pickerStyle(.segmented)
 
             Divider()
+
+            HStack(spacing: DS.Spacing.sm) {
+                Text("Connected providers: \(state.connectedProviderIDs.count)")
+                    .font(DS.body(11))
+                    .foregroundStyle(DS.Colors.textSecondary)
+                Spacer()
+                if state.disconnectedModelCount > 0 {
+                    Text("\(state.disconnectedModelCount) unavailable")
+                        .font(DS.mono(10, weight: .medium))
+                        .foregroundStyle(DS.Colors.textTertiary)
+                }
+            }
 
             HStack(spacing: DS.Spacing.sm) {
                 TextField("Provider", text: $customProvider).textFieldStyle(.roundedBorder)
@@ -350,6 +371,86 @@ struct AppSettingsView: View {
                             .buttonStyle(.bordered)
                     }
                     .padding(.vertical, 2)
+                }
+            }
+        }
+    }
+
+    private var modelVisibilityCard: some View {
+        settingsCard(title: "Model Picker", subtitle: "Only connected providers are shown in chat. Hide noisy models without editing JSON.") {
+            HStack(spacing: DS.Spacing.sm) {
+                Label("\(state.connectedAvailableModels.count) connected", systemImage: "checkmark.circle")
+                    .font(DS.body(11, weight: .semibold))
+                    .foregroundStyle(DS.Colors.textSecondary)
+                if state.disconnectedModelCount > 0 {
+                    Label("\(state.disconnectedModelCount) disconnected", systemImage: "eye.slash")
+                        .font(DS.body(11, weight: .semibold))
+                        .foregroundStyle(DS.Colors.textTertiary)
+                }
+                Spacer()
+                Button("Show all hidden") { state.resetHiddenModels() }
+                    .buttonStyle(.bordered)
+                    .disabled(state.hiddenModels.isEmpty)
+            }
+
+            if state.visibleModelGroups.isEmpty {
+                Text("No connected models yet. Authenticate a provider above and reconnect PiChat.")
+                    .font(DS.body(11))
+                    .foregroundStyle(DS.Colors.textTertiary)
+            } else {
+                ForEach(state.visibleModelGroups) { group in
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack {
+                            ProviderDot(provider: group.provider)
+                            Text(group.provider)
+                                .font(DS.mono(11, weight: .semibold))
+                                .foregroundStyle(DS.Colors.textSecondary)
+                            Spacer()
+                            Text("\(group.models.count) visible")
+                                .font(DS.mono(10))
+                                .foregroundStyle(DS.Colors.textTertiary)
+                        }
+
+                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 210), spacing: 8)], spacing: 8) {
+                            ForEach(group.models, id: \.modelKey) { model in
+                                SettingsModelChip(model: model, isSelected: model.modelKey == state.currentModel?.modelKey) {
+                                    state.hideModel(model)
+                                }
+                            }
+                        }
+                    }
+                    .padding(DS.Spacing.sm)
+                    .background(DS.Colors.surfaceElevated)
+                    .clipShape(RoundedRectangle(cornerRadius: DS.Radius.sm))
+                    .overlay(RoundedRectangle(cornerRadius: DS.Radius.sm).stroke(DS.Colors.border, lineWidth: 1))
+                }
+            }
+
+            if !state.hiddenModels.isEmpty {
+                DisclosureGroup("Hidden models (\(state.hiddenModels.count))") {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 210), spacing: 8)], spacing: 8) {
+                        ForEach(state.hiddenModels, id: \.modelKey) { model in
+                            Button {
+                                state.showModel(model)
+                            } label: {
+                                HStack {
+                                    VStack(alignment: .leading, spacing: 1) {
+                                        Text(model.name).lineLimit(1)
+                                        Text(model.provider).font(DS.mono(9)).foregroundStyle(DS.Colors.textTertiary).lineLimit(1)
+                                    }
+                                    Spacer()
+                                    Image(systemName: "eye")
+                                }
+                                .font(DS.body(10))
+                                .foregroundStyle(DS.Colors.textSecondary)
+                                .padding(8)
+                                .background(DS.Colors.surfaceElevated)
+                                .clipShape(RoundedRectangle(cornerRadius: DS.Radius.sm))
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding(.top, 6)
                 }
             }
         }
@@ -702,6 +803,45 @@ struct AppSettingsView: View {
                 .clipShape(RoundedRectangle(cornerRadius: DS.Radius.sm))
                 .overlay(RoundedRectangle(cornerRadius: DS.Radius.sm).stroke(DS.Colors.border, lineWidth: 1))
         }
+    }
+}
+
+private struct SettingsModelChip: View {
+    let model: AgentModel
+    let isSelected: Bool
+    let onHide: () -> Void
+
+    var body: some View {
+        HStack(spacing: 8) {
+            VStack(alignment: .leading, spacing: 1) {
+                Text(model.name)
+                    .font(DS.body(10, weight: isSelected ? .semibold : .regular))
+                    .foregroundStyle(isSelected ? DS.Colors.textPrimary : DS.Colors.textSecondary)
+                    .lineLimit(1)
+                Text(model.provider)
+                    .font(DS.mono(9))
+                    .foregroundStyle(DS.Colors.textTertiary)
+                    .lineLimit(1)
+            }
+            Spacer()
+            if isSelected {
+                Image(systemName: "checkmark")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(DS.Colors.accent)
+            } else {
+                Button(action: onHide) {
+                    Image(systemName: "eye.slash")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(DS.Colors.textTertiary)
+                }
+                .buttonStyle(.plain)
+                .help("Hide from chat selector")
+            }
+        }
+        .padding(8)
+        .background(isSelected ? DS.Colors.accentDim : DS.Colors.background.opacity(0.45))
+        .clipShape(RoundedRectangle(cornerRadius: DS.Radius.sm))
+        .overlay(RoundedRectangle(cornerRadius: DS.Radius.sm).stroke(isSelected ? DS.Colors.borderAccent : DS.Colors.border.opacity(0.7), lineWidth: 1))
     }
 }
 

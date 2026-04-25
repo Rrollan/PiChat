@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.0.8] - 2026-04-25
+
+### Added
+- Full-chat drag-and-drop overlay for attaching images and files
+- Shared attachment ingress handling for pasteboard, paste commands, and drops
+
+### Fixed
+- Finder `Cmd+V` paste now attaches copied files and image files correctly
+- Duplicate attachments are ignored
+- MIME type detection now uses macOS Uniform Type Identifiers
+
 ## [1.0.5] - 2026-04-24
 
 ### Added
