@@ -20,6 +20,8 @@
 
 PiChat is a clean, production-ready SwiftUI desktop app that runs `pi --mode rpc` behind the scenes and gives you a modern GUI for everyday agentic coding.
 
+PiChat also pairs with **PiBrowser**, a Chrome extension that lets the Pi agent inspect pages, open tabs, click, type, scroll, and answer questions about the current browser page through real `browser_*` tools.
+
 ---
 
 ## ⬇️ Download
@@ -61,6 +63,21 @@ PiChat is a clean, production-ready SwiftUI desktop app that runs `pi --mode rpc
 - Extension dialogs (`confirm`, `select`, `input`, `editor`)
 - Full config editing (`settings.json`, `models.json`, `auth.json`)
 - Dynamic MCP list loaded from local `mcp.json`
+- PiBrowser pairing for local browser automation
+- Browser tool support: open tab, page context, click, type, press keys, scroll, screenshot, wait
+- Native bridge installer for Chrome Native Messaging
+
+---
+
+## 🌐 PiBrowser extension
+
+PiBrowser is the companion Chrome extension for browser control from PiChat.
+
+- Repository: **https://github.com/Rrollan/PiBrowser**
+- Install without Chrome Web Store: download the latest PiBrowser release ZIP, unzip it, then load the folder in `chrome://extensions` with Developer Mode enabled.
+- Pairing flow: open PiBrowser, copy the Browspi/PiBrowser ID, paste it in PiChat → Settings → Browser, then press **Connect Browser**.
+
+When connected, the Pi agent can use real browser tools while the extension shows a small visual cursor and page highlight so you can see what is being controlled.
 
 ---
 

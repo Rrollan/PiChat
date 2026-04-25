@@ -1,9 +1,33 @@
 import Foundation
+import CryptoKit
 
 struct NativeMessagingInstallResult {
     let manifestPath: String
     let hostPath: String
     let allowedOrigin: String
+}
+
+struct NativeMessagingManifestSnapshot {
+    let exists: Bool
+    let path: String
+    let hostPath: String?
+    let allowedOrigins: [String]
+}
+
+struct BrowserBridgeClientSnapshot: Codable {
+    var extensionId: String?
+    var version: String?
+    var surface: String?
+}
+
+struct BrowserBridgePairingSnapshot: Codable {
+    var pairingRequired: Bool
+    var tokenHash: String?
+    var paired: Bool
+    var lastPairedAt: Double?
+    var lastSeenAt: Double?
+    var client: BrowserBridgeClientSnapshot?
+    var updatedAt: Double?
 }
 
 enum NativeMessagingInstallerError: LocalizedError {
@@ -44,6 +68,29 @@ struct NativeMessagingInstaller {
         applicationSupportHostDirectory.appendingPathComponent("browspi-native-host")
     }
 
+    static var pairingConfigPath: URL {
+        applicationSupportHostDirectory.appendingPathComponent("pairing.json")
+    }
+
+    static var installedBrowserToolsDirectory: URL {
+        applicationSupportHostDirectory.appendingPathComponent("browser-tools", isDirectory: true)
+    }
+
+    static var installedBrowserToolsExtensionPath: URL {
+        installedBrowserToolsDirectory.appendingPathComponent("index.ts")
+    }
+
+    static func generatePairingToken() -> String {
+        let alphabet = Array("ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789")
+        var generator = SystemRandomNumberGenerator()
+        return String((0..<24).map { _ in alphabet.randomElement(using: &generator) ?? "X" })
+    }
+
+    static func pairingTokenHash(_ token: String) -> String {
+        let digest = SHA256.hash(data: Data(token.utf8))
+        return digest.map { String(format: "%02x", $0) }.joined()
+    }
+
     static func normalizeExtensionId(_ raw: String) throws -> String {
         let trimmed = raw
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -78,17 +125,82 @@ struct NativeMessagingInstaller {
         throw NativeMessagingInstallerError.invalidExtensionId(raw)
     }
 
+    static func manifestSnapshot() -> NativeMessagingManifestSnapshot {
+        guard let data = try? Data(contentsOf: chromeManifestPath),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return NativeMessagingManifestSnapshot(exists: false, path: chromeManifestPath.path, hostPath: nil, allowedOrigins: [])
+        }
+        return NativeMessagingManifestSnapshot(
+            exists: true,
+            path: chromeManifestPath.path,
+            hostPath: json["path"] as? String,
+            allowedOrigins: json["allowed_origins"] as? [String] ?? []
+        )
+    }
+
     static func isInstalled(extensionId: String) -> Bool {
         guard let normalized = try? normalizeExtensionId(extensionId) else { return false }
-        guard let data = try? Data(contentsOf: chromeManifestPath),
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return false }
-        let path = json["path"] as? String
-        let origins = json["allowed_origins"] as? [String] ?? []
-        return path == installedHostPath.path && origins.contains("chrome-extension://\(normalized)/")
+        let manifest = manifestSnapshot()
+        return manifest.hostPath == installedHostPath.path && manifest.allowedOrigins.contains("chrome-extension://\(normalized)/")
+    }
+
+    static func readPairingSnapshot() -> BrowserBridgePairingSnapshot? {
+        guard let data = try? Data(contentsOf: pairingConfigPath) else { return nil }
+        return try? JSONDecoder().decode(BrowserBridgePairingSnapshot.self, from: data)
+    }
+
+    static func writePairingConfig(token: String, required: Bool = true) throws {
+        let fm = FileManager.default
+        try fm.createDirectory(at: applicationSupportHostDirectory, withIntermediateDirectories: true)
+        let tokenHash = pairingTokenHash(token)
+        let existing = readPairingSnapshot()
+        let sameToken = existing?.tokenHash == tokenHash
+        let snapshot = BrowserBridgePairingSnapshot(
+            pairingRequired: required,
+            tokenHash: tokenHash,
+            paired: sameToken ? (existing?.paired ?? false) : false,
+            lastPairedAt: sameToken ? existing?.lastPairedAt : nil,
+            lastSeenAt: sameToken ? existing?.lastSeenAt : nil,
+            client: sameToken ? existing?.client : nil,
+            updatedAt: Date().timeIntervalSince1970
+        )
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        let data = try encoder.encode(snapshot)
+        try data.write(to: pairingConfigPath, options: [.atomic])
+    }
+
+    static func writeTrustedOriginPairingConfig() throws {
+        let fm = FileManager.default
+        try fm.createDirectory(at: applicationSupportHostDirectory, withIntermediateDirectories: true)
+        let existing = readPairingSnapshot()
+        let snapshot = BrowserBridgePairingSnapshot(
+            pairingRequired: false,
+            tokenHash: nil,
+            paired: true,
+            lastPairedAt: existing?.lastPairedAt,
+            lastSeenAt: existing?.lastSeenAt,
+            client: existing?.client,
+            updatedAt: Date().timeIntervalSince1970
+        )
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        let data = try encoder.encode(snapshot)
+        try data.write(to: pairingConfigPath, options: [.atomic])
+    }
+
+    static func uninstall() throws {
+        let fm = FileManager.default
+        if fm.fileExists(atPath: chromeManifestPath.path) {
+            try fm.removeItem(at: chromeManifestPath)
+        }
+        if fm.fileExists(atPath: pairingConfigPath.path) {
+            try fm.removeItem(at: pairingConfigPath)
+        }
     }
 
     @discardableResult
-    static func install(extensionId rawExtensionId: String) throws -> NativeMessagingInstallResult {
+    static func install(extensionId rawExtensionId: String, pairingToken: String? = nil) throws -> NativeMessagingInstallResult {
         let extensionId = try normalizeExtensionId(rawExtensionId)
         let fm = FileManager.default
 
@@ -96,6 +208,7 @@ struct NativeMessagingInstaller {
               let bundledHostWrapper = Bundle.main.url(forResource: "browspi-native-host", withExtension: nil) else {
             throw NativeMessagingInstallerError.missingBundledHost
         }
+        let bundledBrowserTools = Bundle.main.url(forResource: "index", withExtension: "ts", subdirectory: "browser-tools")
 
         try fm.createDirectory(at: applicationSupportHostDirectory, withIntermediateDirectories: true)
         for url in [installedHostScriptPath, installedHostPath] where fm.fileExists(atPath: url.path) {
@@ -103,6 +216,13 @@ struct NativeMessagingInstaller {
         }
         try fm.copyItem(at: bundledHostScript, to: installedHostScriptPath)
         try fm.copyItem(at: bundledHostWrapper, to: installedHostPath)
+        if let bundledBrowserTools {
+            try fm.createDirectory(at: installedBrowserToolsDirectory, withIntermediateDirectories: true)
+            if fm.fileExists(atPath: installedBrowserToolsExtensionPath.path) {
+                try fm.removeItem(at: installedBrowserToolsExtensionPath)
+            }
+            try fm.copyItem(at: bundledBrowserTools, to: installedBrowserToolsExtensionPath)
+        }
         try fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: installedHostScriptPath.path)
         try fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: installedHostPath.path)
 
@@ -120,6 +240,12 @@ struct NativeMessagingInstaller {
 
         let data = try JSONSerialization.data(withJSONObject: manifest, options: [.prettyPrinted, .sortedKeys])
         try data.write(to: chromeManifestPath, options: [.atomic])
+
+        if let pairingToken, !pairingToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            try writePairingConfig(token: pairingToken)
+        } else {
+            try writeTrustedOriginPairingConfig()
+        }
 
         return NativeMessagingInstallResult(
             manifestPath: chromeManifestPath.path,

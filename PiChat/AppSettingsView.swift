@@ -385,17 +385,49 @@ struct AppSettingsView: View {
     }
 
     private var browserAssistantCard: some View {
-        settingsCard(title: "Browser Assistant", subtitle: "Connect Browspi Chrome extension to local Pi/PiChat") {
-            Text("This installs Chrome Native Messaging host com.browspi.pi_bridge. Browspi can then connect without a separate HTTP bridge.")
-                .font(DS.body(11))
-                .foregroundStyle(DS.Colors.textTertiary)
+        settingsCard(title: "Browser Control", subtitle: "Connect Browspi to PiChat") {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text("Status")
+                        .font(DS.body(11, weight: .semibold))
+                        .foregroundStyle(DS.Colors.textSecondary)
+                    Spacer()
+                    Text(state.browserBridgeStatusText)
+                        .font(DS.body(11, weight: .bold))
+                        .foregroundStyle(state.browserBridgeStatusText == "Connected" ? DS.Colors.green : DS.Colors.textPrimary)
+                }
+                HStack {
+                    Text("Browser tools")
+                        .font(DS.body(11, weight: .semibold))
+                        .foregroundStyle(DS.Colors.textSecondary)
+                    Spacer()
+                    Text(state.browserToolsStatusText)
+                        .font(DS.body(11, weight: .bold))
+                        .foregroundStyle(DS.Colors.green)
+                }
+                HStack {
+                    Text("Last seen")
+                        .font(DS.body(11, weight: .semibold))
+                        .foregroundStyle(DS.Colors.textSecondary)
+                    Spacer()
+                    Text(state.browserBridgeLastSeenText)
+                        .font(DS.body(11))
+                        .foregroundStyle(DS.Colors.textTertiary)
+                        .textSelection(.enabled)
+                }
+            }
+            .padding(.horizontal, DS.Spacing.sm)
+            .padding(.vertical, 8)
+            .background(DS.Colors.surfaceElevated)
+            .clipShape(RoundedRectangle(cornerRadius: DS.Radius.sm))
+            .overlay(RoundedRectangle(cornerRadius: DS.Radius.sm).stroke(DS.Colors.border, lineWidth: 1))
 
             VStack(alignment: .leading, spacing: 6) {
-                Text("Browspi Browser UID")
+                Text("Browspi ID")
                     .font(DS.body(11, weight: .semibold))
                     .foregroundStyle(DS.Colors.textSecondary)
-                TextField("Paste digit-only Browser UID from Browspi Connect", text: $state.browserExtensionId)
-                    .font(DS.mono(11))
+                TextField("Paste Browspi ID", text: $state.browserExtensionId)
+                    .font(DS.mono(12))
                     .textFieldStyle(.roundedBorder)
                     .onChange(of: state.browserExtensionId) { _, _ in
                         state.persistBrowserSettings()
@@ -404,37 +436,36 @@ struct AppSettingsView: View {
             }
 
             HStack(spacing: DS.Spacing.sm) {
-                Button("Install / Update Native Bridge") {
+                Button("Connect Browser") {
                     Task { await state.installBrowserNativeBridge() }
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(state.isInstallingBrowserBridge || state.browserExtensionId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
 
-                Button("Open Chrome Extensions") { state.openChromeExtensionsPage() }
+                Button("Disconnect") { state.disconnectBrowserNativeBridge() }
+                    .buttonStyle(.bordered)
+
+                Button("Open Chrome Extension") { state.openBrowspiChromeExtensionPage() }
                     .buttonStyle(.bordered)
 
                 Button("Refresh") { state.refreshBrowserBridgeStatus() }
                     .buttonStyle(.bordered)
             }
 
-            VStack(alignment: .leading, spacing: 4) {
-                Text(state.browserBridgeStatusText)
-                    .font(DS.body(11, weight: .medium))
+            VStack(alignment: .leading, spacing: 5) {
+                Text("How to connect")
+                    .font(DS.body(11, weight: .semibold))
                     .foregroundStyle(DS.Colors.textPrimary)
-                Text(state.browserBridgeManifestPath)
-                    .font(DS.mono(10))
+                Text("1. Open Browspi extension in Chrome.\n2. If it is not connected, copy the Browspi ID shown in the red card.\n3. Paste the ID here and press Connect Browser.\n4. Reload Browspi in Chrome and press Connect there. Browser control is enabled by default.")
+                    .font(DS.body(11))
                     .foregroundStyle(DS.Colors.textTertiary)
-                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             .padding(.horizontal, DS.Spacing.sm)
             .padding(.vertical, 8)
             .background(DS.Colors.surfaceElevated)
             .clipShape(RoundedRectangle(cornerRadius: DS.Radius.sm))
             .overlay(RoundedRectangle(cornerRadius: DS.Radius.sm).stroke(DS.Colors.border, lineWidth: 1))
-
-            Text("After installing: reload the Browspi extension, open its side panel, and press Connect. Browspi shows the digit-only Browser UID in the Connect error hint/title.")
-                .font(DS.body(10))
-                .foregroundStyle(DS.Colors.textTertiary)
         }
     }
 

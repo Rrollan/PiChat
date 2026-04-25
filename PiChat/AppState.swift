@@ -201,8 +201,14 @@ class AppState: ObservableObject {
 
     // MARK: Browser Assistant
     @Published var browserExtensionId: String = ""
-    @Published var browserBridgeStatusText: String = "Not installed"
+    @Published var browserPairingToken: String = ""
+    @Published var browserBridgeStatusText: String = "Not configured"
     @Published var browserBridgeManifestPath: String = NativeMessagingInstaller.chromeManifestPath.path
+    @Published var browserBridgeAllowedOrigin: String = "Not configured"
+    @Published var browserBridgeLastSeenText: String = "Never"
+    @Published var browserBridgePairingStatusText: String = "Pairing token not installed"
+    @Published var browserToolsEnabled: Bool = true
+    @Published var browserToolsStatusText: String = "Enabled"
     @Published var isInstallingBrowserBridge = false
 
     // MARK: Install Location Hint
@@ -246,7 +252,9 @@ class AppState: ObservableObject {
         self.cliSystemPrompt = defaults.string(forKey: "pi.cli.systemPrompt") ?? ""
         self.cliAppendSystemPrompt = defaults.string(forKey: "pi.cli.appendSystemPrompt") ?? ""
         self.cliExtraArgs = defaults.string(forKey: "pi.cli.extraArgs") ?? ""
+        self.browserToolsEnabled = true
         self.browserExtensionId = defaults.string(forKey: "browser.extensionId") ?? ""
+        self.browserPairingToken = defaults.string(forKey: "browser.pairingToken") ?? ""
         refreshBrowserBridgeStatus()
         setupEventHandling()
         loadConfigFiles()
@@ -988,23 +996,92 @@ try {
         NSWorkspace.shared.open(URL(fileURLWithPath: "/Applications", isDirectory: true))
     }
 
+    var browserToolsExtensionPath: String {
+        if let bundled = Bundle.main.url(forResource: "index", withExtension: "ts", subdirectory: "browser-tools") {
+            return bundled.path
+        }
+        return NativeMessagingInstaller.installedBrowserToolsExtensionPath.path
+    }
+
     func persistBrowserSettings() {
-        UserDefaults.standard.set(browserExtensionId.trimmingCharacters(in: .whitespacesAndNewlines), forKey: "browser.extensionId")
+        let defaults = UserDefaults.standard
+        defaults.set(true, forKey: "browser.toolsEnabled")
+        defaults.set(browserExtensionId.trimmingCharacters(in: .whitespacesAndNewlines), forKey: "browser.extensionId")
+    }
+
+    private func formatBrowserBridgeTime(_ value: Double?) -> String {
+        guard let value, value > 0 else { return "Never" }
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .full
+        let date = Date(timeIntervalSince1970: value)
+        return "\(formatter.localizedString(for: date, relativeTo: Date())) (\(date.formatted(date: .abbreviated, time: .shortened)))"
     }
 
     func refreshBrowserBridgeStatus() {
         let id = browserExtensionId.trimmingCharacters(in: .whitespacesAndNewlines)
+        let manifest = NativeMessagingInstaller.manifestSnapshot()
+        let pairing = NativeMessagingInstaller.readPairingSnapshot()
         browserBridgeManifestPath = NativeMessagingInstaller.chromeManifestPath.path
+        browserBridgeAllowedOrigin = manifest.allowedOrigins.first ?? (id.isEmpty ? "Not configured" : "Not installed")
+        browserBridgeLastSeenText = formatBrowserBridgeTime(pairing?.lastSeenAt)
+
+        if let pairing {
+            let hashPreview = String((pairing.tokenHash ?? "").prefix(12))
+            if !pairing.pairingRequired {
+                browserBridgePairingStatusText = "Trusted origin mode"
+            } else if pairing.paired {
+                let client = [pairing.client?.extensionId, pairing.client?.version, pairing.client?.surface]
+                    .compactMap { value in
+                        let trimmed = (value ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                        return trimmed.isEmpty ? nil : trimmed
+                    }
+                    .joined(separator: " • ")
+                browserBridgePairingStatusText = client.isEmpty ? "Paired" : "Paired with \(client)"
+            } else if pairing.pairingRequired {
+                browserBridgePairingStatusText = hashPreview.isEmpty ? "Pairing required" : "Pairing required · token hash \(hashPreview)…"
+            } else {
+                browserBridgePairingStatusText = "Pairing not required"
+            }
+        } else {
+            browserBridgePairingStatusText = "Pairing token not installed yet"
+        }
+
+        browserToolsEnabled = true
+        let toolsFileExists = FileManager.default.fileExists(atPath: browserToolsExtensionPath)
+        browserToolsStatusText = toolsFileExists ? "Browser control is on" : "Browser tool file is missing"
+
         guard !id.isEmpty else {
-            browserBridgeStatusText = "Paste your Browspi Browser UID to install the native bridge."
+            browserBridgeStatusText = manifest.exists ? "Native host installed · add Browspi ID to connect" : "Not configured"
             return
         }
-        if let normalizedId = try? NativeMessagingInstaller.normalizeExtensionId(id) {
-            browserBridgeStatusText = NativeMessagingInstaller.isInstalled(extensionId: id)
-                ? "Installed for chrome-extension://\(normalizedId)/"
-                : "Not installed for this Browser UID."
+
+        guard let normalizedId = try? NativeMessagingInstaller.normalizeExtensionId(id) else {
+            browserBridgeStatusText = "Paste Browspi ID from the extension"
+            return
+        }
+
+        let expectedOrigin = "chrome-extension://\(normalizedId)/"
+        browserBridgeAllowedOrigin = manifest.allowedOrigins.first ?? expectedOrigin
+        if NativeMessagingInstaller.isInstalled(extensionId: id) {
+            let recentlySeen = (pairing?.lastSeenAt).map { Date().timeIntervalSince1970 - $0 < 120 } ?? false
+            browserBridgeStatusText = recentlySeen ? "Connected" : "Installed — open Browspi and press Connect"
+        } else if manifest.exists {
+            browserBridgeStatusText = "Installed for another extension — press Connect again"
         } else {
-            browserBridgeStatusText = "Invalid Browser UID. Paste the digit-only UID shown by Browspi Connect."
+            browserBridgeStatusText = "Not connected"
+        }
+    }
+
+    func disconnectBrowserNativeBridge() {
+        do {
+            try NativeMessagingInstaller.uninstall()
+            browserBridgeStatusText = "Disconnected"
+            browserBridgeAllowedOrigin = "Not configured"
+            browserBridgePairingStatusText = "Not paired"
+            refreshBrowserBridgeStatus()
+            show(notification: AppNotification(message: "Browser connection removed", type: .success))
+        } catch {
+            show(notification: AppNotification(message: "Failed to disconnect browser: \(error.localizedDescription)", type: .error))
         }
     }
 
@@ -1013,19 +1090,51 @@ try {
         defer { isInstallingBrowserBridge = false }
         do {
             persistBrowserSettings()
-            let result = try NativeMessagingInstaller.install(extensionId: browserExtensionId)
+            let result = try NativeMessagingInstaller.install(extensionId: browserExtensionId, pairingToken: nil)
             browserBridgeManifestPath = result.manifestPath
-            browserBridgeStatusText = "Installed. Restart/reload Browspi and click Connect."
-            notification = AppNotification(message: "Browser bridge installed for \(result.allowedOrigin)", type: .success)
+            browserBridgeAllowedOrigin = result.allowedOrigin
+            refreshBrowserBridgeStatus()
+            show(notification: AppNotification(message: "Browser connected for \(result.allowedOrigin). Reload Browspi and press Connect.", type: .success))
         } catch {
             browserBridgeStatusText = error.localizedDescription
-            notification = AppNotification(message: "Browser bridge install failed: \(error.localizedDescription)", type: .error)
+            show(notification: AppNotification(message: "Browser bridge install failed: \(error.localizedDescription)", type: .error))
         }
+    }
+
+    func copyBrowserPairingToken() {
+        persistBrowserSettings()
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(browserPairingToken, forType: .string)
+        show(notification: AppNotification(message: "Browser pairing token copied", type: .success))
+    }
+
+    func regenerateBrowserPairingToken() {
+        browserPairingToken = NativeMessagingInstaller.generatePairingToken()
+        persistBrowserSettings()
+        try? NativeMessagingInstaller.writePairingConfig(token: browserPairingToken)
+        refreshBrowserBridgeStatus()
+        show(notification: AppNotification(message: "New Browser pairing token generated. Reconnect Browspi.", type: .warning))
+    }
+
+    func openBrowspiConnectInstructions() {
+        let id = browserExtensionId.trimmingCharacters(in: .whitespacesAndNewlines)
+        show(notification: AppNotification(message: id.isEmpty ? "Open Browspi, copy its ID, paste it here, then press Connect Browser." : "Open Browspi and press Connect.", type: .info))
+        openChromeExtensionsPage()
+    }
+
+    func openBrowspiChromeExtensionPage() {
+        let id = (try? NativeMessagingInstaller.normalizeExtensionId(browserExtensionId)) ?? ""
+        let urlString = id.isEmpty ? "chrome://extensions/" : "chrome://extensions/?id=\(id)"
+        guard let extensionsURL = URL(string: urlString) else { return }
+        openChromeURL(extensionsURL)
     }
 
     func openChromeExtensionsPage() {
         guard let extensionsURL = URL(string: "chrome://extensions/") else { return }
+        openChromeURL(extensionsURL)
+    }
 
+    private func openChromeURL(_ extensionsURL: URL) {
         let configuration = NSWorkspace.OpenConfiguration()
         configuration.activates = true
 
@@ -1108,6 +1217,10 @@ try {
         if cliNoThemes { args.append("--no-themes") }
         if cliNoContextFiles { args.append("--no-context-files") }
         if cliVerbose { args.append("--verbose") }
+
+        if browserToolsEnabled && !cliNoExtensions && FileManager.default.fileExists(atPath: browserToolsExtensionPath) {
+            args += ["--extension", browserToolsExtensionPath]
+        }
 
         if !cliSystemPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             args += ["--system-prompt", cliSystemPrompt]
