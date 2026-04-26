@@ -1,0 +1,69 @@
+{
+  "name": "pichat-windows",
+  "version": "1.0.0",
+  "description": "Windows desktop client for PiChat / pi coding agent",
+  "private": true,
+  "main": "dist/main/main.js",
+  "type": "commonjs",
+  "scripts": {
+    "dev": "tsc -p tsconfig.main.json && concurrently -k \"vite --host 127.0.0.1\" \"wait-on http://127.0.0.1:5173 && electron .\"",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "build": "tsc -p tsconfig.main.json && vite build",
+    "start": "electron .",
+    "dist": "npm run build && electron-builder --win nsis portable --x64",
+    "build:native-host": "powershell -ExecutionPolicy Bypass -File scripts/build-native-host.ps1",
+    "verify:windows": "powershell -ExecutionPolicy Bypass -File scripts/verify-windows.ps1"
+  },
+  "dependencies": {
+    "react": "latest",
+    "react-dom": "latest"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "latest",
+    "concurrently": "latest",
+    "electron": "latest",
+    "electron-builder": "latest",
+    "typescript": "latest",
+    "vite": "latest",
+    "wait-on": "latest"
+  },
+  "build": {
+    "appId": "com.rrollan.pichat.windows",
+    "productName": "PiChat",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "resources",
+        "to": "resources"
+      },
+      {
+        "from": "public/images",
+        "to": "images"
+      }
+    ],
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ],
+      "icon": "build/icon.ico"
+    },
+    "nsis": {
+      "artifactName": "PiChat-Windows-Setup-${version}-${arch}.${ext}",
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true
+    },
+    "portable": {
+      "artifactName": "PiChat-Windows-Portable-${version}-${arch}.${ext}"
+    }
+  }
+}

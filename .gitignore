@@ -7,3 +7,8 @@ xcuserdata/
 DerivedData/
 .swiftpm/
 Package.resolved
+windows version/node_modules/
+windows version/dist/
+windows version/release/
+windows version/resources/native-host/publish/
+windows version/resources/native-host/PiChatNativeHost.exe
