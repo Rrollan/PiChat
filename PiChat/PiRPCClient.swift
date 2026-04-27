@@ -425,7 +425,8 @@ class PiRPCClient: ObservableObject {
         case "tool_execution_start":
             let tcId = json["toolCallId"] as? String ?? ""
             let tn = json["toolName"] as? String ?? ""
-            eventSubject.send(.toolExecutionStart(toolCallId: tcId, toolName: tn, args: nil))
+            let args = json["args"].map { AnyCodable($0) }
+            eventSubject.send(.toolExecutionStart(toolCallId: tcId, toolName: tn, args: args))
 
         case "tool_execution_update":
             let tcId = json["toolCallId"] as? String ?? ""

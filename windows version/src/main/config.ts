@@ -112,10 +112,12 @@ export function loadConfigState(configDir: string): ConfigState {
   const settingsJSONText = readRawFile(configDir, 'settings.json', '{}');
   const modelsJSONText = readRawFile(configDir, 'models.json', '{\n  "providers": {}\n}');
   const authJSONText = readRawFile(configDir, 'auth.json', '{}');
+  const mcpJSONText = readRawFile(configDir, 'mcp.json', '{}');
   return {
     settingsJSONText,
     modelsJSONText,
     authJSONText,
+    mcpJSONText,
     authEntries: loadAuthEntries(configDir),
     mcpServers: loadMCPServers(configDir)
   };

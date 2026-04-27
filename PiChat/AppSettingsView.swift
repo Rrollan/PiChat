@@ -29,6 +29,11 @@ struct AppSettingsView: View {
     @State private var showCLIFlags = false
     @State private var showFullSettingsForm = false
     @State private var showRawJSONEditors = false
+    @State private var packageResource = ""
+    @State private var extensionResource = ""
+    @State private var skillResource = ""
+    @State private var promptResource = ""
+    @State private var themeResource = ""
 
     private let subscriptionProviders: [LoginProvider] = [
         .init(id: "anthropic", label: "Anthropic (Claude Pro/Max)"),
@@ -156,6 +161,7 @@ struct AppSettingsView: View {
                     browserAssistantCard
                 case .advanced:
                     rpcBehaviorCard
+                    resourceLibraryCard
                     advancedDataCard
                 }
             }
@@ -338,6 +344,11 @@ struct AppSettingsView: View {
                 .overlay(RoundedRectangle(cornerRadius: DS.Radius.sm).stroke(DS.Colors.border, lineWidth: 1))
             }
 
+            if state.oauthAuthURLString != nil || state.oauthVerificationCode != nil || state.oauthAuthInstructions != nil {
+                OAuthInstructionCard()
+                    .environmentObject(state)
+            }
+
             if let prompt = state.oauthPromptMessage, state.isOAuthLoginRunning {
                 VStack(alignment: .leading, spacing: DS.Spacing.xs) {
                     Text(prompt)
@@ -347,11 +358,17 @@ struct AppSettingsView: View {
                     HStack(spacing: DS.Spacing.sm) {
                         TextField(state.oauthPromptPlaceholder ?? "Paste code or redirect URL", text: $state.oauthPromptInput)
                             .textFieldStyle(.roundedBorder)
-                        Button("Submit") {
+                        Button(state.oauthPromptAllowsEmpty ? "Continue" : "Submit") {
                             state.submitOAuthPromptInput()
                         }
                         .buttonStyle(.borderedProminent)
-                        .disabled(state.oauthPromptInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        .disabled(!state.oauthPromptAllowsEmpty && state.oauthPromptInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    }
+
+                    if state.oauthPromptAllowsEmpty {
+                        Text("Leave empty and press Continue for the default value.")
+                            .font(DS.body(10))
+                            .foregroundStyle(DS.Colors.textTertiary)
                     }
                 }
             }
@@ -674,6 +691,90 @@ struct AppSettingsView: View {
         }
     }
 
+    private var resourceLibraryCard: some View {
+        settingsCard(title: "Pi Resources", subtitle: "Install packages, skills, extensions, prompts, and themes from one place") {
+            Text("These entries are saved to settings.json. You can also ask the agent in chat to install a skill or MCP server; PiChat will refresh this panel after the agent changes settings.json or mcp.json.")
+                .font(DS.body(11))
+                .foregroundStyle(DS.Colors.textTertiary)
+
+            resourceRow(kind: .packages, text: $packageResource, currentCSV: state.sPackages, placeholder: "pi-skills or github:user/repo")
+            resourceRow(kind: .skills, text: $skillResource, currentCSV: state.sSkills, placeholder: "~/.pi/agent/skills/my-skill")
+            resourceRow(kind: .extensions, text: $extensionResource, currentCSV: state.sExtensions, placeholder: "~/.pi/agent/extensions/tool.ts")
+            resourceRow(kind: .prompts, text: $promptResource, currentCSV: state.sPrompts, placeholder: "~/.pi/agent/prompts")
+            resourceRow(kind: .themes, text: $themeResource, currentCSV: state.sThemes, placeholder: "~/.pi/agent/themes")
+
+            Divider()
+
+            HStack(spacing: DS.Spacing.sm) {
+                Label("MCP servers", systemImage: "point.3.connected.trianglepath.dotted")
+                    .font(DS.body(11, weight: .semibold))
+                Spacer()
+                Badge(text: "\(state.mcpServers.count)", color: DS.Colors.green)
+            }
+            Text("Edit mcp.json in the raw JSON editor below. Servers appear in the right panel after reconnect.")
+                .font(DS.body(10))
+                .foregroundStyle(DS.Colors.textTertiary)
+        }
+    }
+
+    private func resourceRow(kind: PiResourceKind, text: Binding<String>, currentCSV: String, placeholder: String) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: DS.Spacing.sm) {
+                Image(systemName: kind.icon)
+                    .foregroundStyle(DS.Colors.accent)
+                    .frame(width: 18)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(kind.title)
+                        .font(DS.body(11, weight: .semibold))
+                    Text(kind.help)
+                        .font(DS.body(9))
+                        .foregroundStyle(DS.Colors.textTertiary)
+                }
+                Spacer()
+            }
+
+            HStack(spacing: DS.Spacing.sm) {
+                TextField(placeholder, text: text)
+                    .textFieldStyle(.roundedBorder)
+                Button("Add") {
+                    state.addPiResource(kind: kind, value: text.wrappedValue)
+                    text.wrappedValue = ""
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(text.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+
+            let items = currentCSV.split(separator: ",").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+            if !items.isEmpty {
+                FlowLayout(spacing: 6) {
+                    ForEach(items, id: \.self) { item in
+                        HStack(spacing: 5) {
+                            Text(item)
+                                .font(DS.mono(9))
+                                .lineLimit(1)
+                            Button {
+                                state.removePiResource(kind: kind, value: item)
+                            } label: {
+                                Image(systemName: "xmark")
+                                    .font(.system(size: 8, weight: .bold))
+                            }
+                            .buttonStyle(.plain)
+                        }
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 4)
+                        .background(DS.Colors.surfaceElevated)
+                        .clipShape(Capsule())
+                        .overlay(Capsule().stroke(DS.Colors.border, lineWidth: 0.5))
+                    }
+                }
+            }
+        }
+        .padding(DS.Spacing.sm)
+        .background(DS.Colors.background.opacity(0.45))
+        .clipShape(RoundedRectangle(cornerRadius: DS.Radius.sm))
+        .overlay(RoundedRectangle(cornerRadius: DS.Radius.sm).stroke(DS.Colors.border.opacity(0.8), lineWidth: 1))
+    }
+
     private var advancedDataCard: some View {
         settingsCard(title: "Advanced", subtitle: "For power users and troubleshooting") {
             DisclosureGroup("CLI launch flags", isExpanded: $showCLIFlags) {
@@ -716,6 +817,7 @@ struct AppSettingsView: View {
                     jsonEditor(title: "settings.json", text: $state.settingsJSONText, saveAction: state.saveSettingsJSON)
                     jsonEditor(title: "models.json", text: $state.modelsJSONText, saveAction: state.saveModelsJSON)
                     jsonEditor(title: "auth.json", text: $state.authJSONText, saveAction: state.saveAuthJSON)
+                    jsonEditor(title: "mcp.json", text: $state.mcpJSONText, saveAction: state.saveMCPJSON)
                     Button("Reload files") { state.loadConfigFiles() }
                         .buttonStyle(.bordered)
                 }
@@ -886,6 +988,112 @@ private struct SettingsModelChip: View {
         .background(isSelected ? DS.Colors.accentDim : DS.Colors.background.opacity(0.45))
         .clipShape(RoundedRectangle(cornerRadius: DS.Radius.sm))
         .overlay(RoundedRectangle(cornerRadius: DS.Radius.sm).stroke(isSelected ? DS.Colors.borderAccent : DS.Colors.border.opacity(0.7), lineWidth: 1))
+    }
+}
+
+private struct FlowLayout: Layout {
+    var spacing: CGFloat = 8
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let maxWidth = proposal.width ?? 640
+        var x: CGFloat = 0
+        var y: CGFloat = 0
+        var rowHeight: CGFloat = 0
+
+        for subview in subviews {
+            let size = subview.sizeThatFits(.unspecified)
+            if x > 0, x + size.width > maxWidth {
+                x = 0
+                y += rowHeight + spacing
+                rowHeight = 0
+            }
+            x += size.width + spacing
+            rowHeight = max(rowHeight, size.height)
+        }
+        return CGSize(width: maxWidth, height: y + rowHeight)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        var x = bounds.minX
+        var y = bounds.minY
+        var rowHeight: CGFloat = 0
+
+        for subview in subviews {
+            let size = subview.sizeThatFits(.unspecified)
+            if x > bounds.minX, x + size.width > bounds.maxX {
+                x = bounds.minX
+                y += rowHeight + spacing
+                rowHeight = 0
+            }
+            subview.place(at: CGPoint(x: x, y: y), proposal: ProposedViewSize(size))
+            x += size.width + spacing
+            rowHeight = max(rowHeight, size.height)
+        }
+    }
+}
+
+private struct OAuthInstructionCard: View {
+    @EnvironmentObject var state: AppState
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: DS.Spacing.sm) {
+            HStack(alignment: .top, spacing: DS.Spacing.sm) {
+                Image(systemName: "key.viewfinder")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(DS.Colors.green)
+                    .frame(width: 30, height: 30)
+                    .background(DS.Colors.green.opacity(0.12))
+                    .clipShape(RoundedRectangle(cornerRadius: DS.Radius.sm))
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Verification step")
+                        .font(DS.body(12, weight: .semibold))
+                        .foregroundStyle(DS.Colors.textPrimary)
+                    Text("PiChat opened the provider page. Use the code below if the browser asks for it.")
+                        .font(DS.body(10))
+                        .foregroundStyle(DS.Colors.textTertiary)
+                }
+                Spacer()
+                if state.oauthAuthURLString != nil {
+                    Button("Open again") { state.openOAuthAuthURL() }
+                        .buttonStyle(.bordered)
+                }
+            }
+
+            if let code = state.oauthVerificationCode {
+                HStack(spacing: DS.Spacing.sm) {
+                    Text(code)
+                        .font(.system(size: 24, weight: .bold, design: .monospaced))
+                        .tracking(1.8)
+                        .foregroundStyle(DS.Colors.textPrimary)
+                        .textSelection(.enabled)
+                    Spacer()
+                    Button("Copy code") { state.copyOAuthVerificationCode() }
+                        .buttonStyle(.borderedProminent)
+                }
+                .padding(DS.Spacing.sm)
+                .background(DS.Colors.background.opacity(0.55))
+                .clipShape(RoundedRectangle(cornerRadius: DS.Radius.sm))
+                .overlay(RoundedRectangle(cornerRadius: DS.Radius.sm).stroke(DS.Colors.green.opacity(0.35), lineWidth: 1))
+            }
+
+            if let instructions = state.oauthAuthInstructions, !instructions.isEmpty {
+                Text(instructions)
+                    .font(DS.body(10, weight: .medium))
+                    .foregroundStyle(DS.Colors.textSecondary)
+                    .textSelection(.enabled)
+            }
+        }
+        .padding(DS.Spacing.md)
+        .background(
+            LinearGradient(
+                colors: [DS.Colors.green.opacity(0.10), DS.Colors.surfaceElevated],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+        )
+        .clipShape(RoundedRectangle(cornerRadius: DS.Radius.md))
+        .overlay(RoundedRectangle(cornerRadius: DS.Radius.md).stroke(DS.Colors.green.opacity(0.25), lineWidth: 1))
     }
 }
 

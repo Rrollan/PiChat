@@ -30,7 +30,7 @@ PiChat is a clean, production-ready SwiftUI desktop app that runs `pi --mode rpc
 
 ### Windows
 
-👉 **[Download PiChat for Windows (Installer EXE)](https://github.com/Rrollan/PiChat/releases/download/windows-v1.0.2/PiChat-Windows-Setup-1.0.2-x64.exe)**
+👉 **[Download PiChat for Windows (Installer EXE)](https://github.com/Rrollan/PiChat/releases/download/windows-v1.0.3/PiChat-Windows-Setup-1.0.3-x64.exe)**
 
 Full Windows guide: **[docs/WINDOWS.md](docs/WINDOWS.md)**
 
@@ -50,7 +50,7 @@ The macOS app bundles the pi coding agent and Node.js runtime. A global `pi` ins
 
 ## 🧩 Install (Windows)
 
-1. Download and run **`PiChat-Windows-Setup-1.0.2-x64.exe`**.
+1. Download and run **`PiChat-Windows-Setup-1.0.3-x64.exe`**.
 2. Open **PiChat** from Start Menu or Desktop shortcut.
 3. The Windows app includes a bundled pi runtime. If you intentionally want to use an external/global `pi`, open **Settings → Pi Runtime** and set its executable path.
 4. Click **Reconnect** and start chatting.

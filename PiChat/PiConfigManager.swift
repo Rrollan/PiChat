@@ -14,6 +14,8 @@ struct MCPServerEntry: Identifiable {
 }
 
 struct PiConfigManager {
+    static let editableConfigFiles: Set<String> = ["settings.json", "models.json", "auth.json", "mcp.json"]
+
     let configDir: String
 
     init(configDir: String = PiConfigManager.defaultConfigDir()) {
@@ -31,7 +33,15 @@ struct PiConfigManager {
         URL(fileURLWithPath: configDir).appendingPathComponent(name).path
     }
 
+    func validateConfigFileName(_ name: String) throws {
+        guard name == URL(fileURLWithPath: name).lastPathComponent,
+              Self.editableConfigFiles.contains(name) else {
+            throw CocoaError(.fileReadInvalidFileName, userInfo: [NSFilePathErrorKey: name])
+        }
+    }
+
     func readJsonFile(named name: String, defaultObject: Any = [:]) throws -> Any {
+        try validateConfigFileName(name)
         let path = filePath(name)
         guard FileManager.default.fileExists(atPath: path) else { return defaultObject }
         let data = try Data(contentsOf: URL(fileURLWithPath: path))
@@ -40,6 +50,7 @@ struct PiConfigManager {
     }
 
     func readRawFile(named name: String, defaultContent: String = "{}") -> String {
+        guard (try? validateConfigFileName(name)) != nil else { return defaultContent }
         let path = filePath(name)
         guard let data = FileManager.default.contents(atPath: path),
               let text = String(data: data, encoding: .utf8),
@@ -50,12 +61,29 @@ struct PiConfigManager {
     }
 
     func writeRawFile(named name: String, content: String) throws {
+        try validateConfigFileName(name)
+        _ = try JSONSerialization.jsonObject(with: Data(content.utf8))
+
         let path = filePath(name)
         let expanded = NSString(string: path).expandingTildeInPath
-        let parent = URL(fileURLWithPath: expanded).deletingLastPathComponent().path
-        try FileManager.default.createDirectory(atPath: parent, withIntermediateDirectories: true)
+        let url = URL(fileURLWithPath: expanded)
+        let parent = url.deletingLastPathComponent()
+        try FileManager.default.createDirectory(at: parent, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         guard let data = content.data(using: .utf8) else { return }
-        try data.write(to: URL(fileURLWithPath: expanded))
+
+        let tmpURL = parent.appendingPathComponent(".\(url.lastPathComponent).\(UUID().uuidString).tmp")
+        try data.write(to: tmpURL, options: .atomic)
+        if name == "auth.json" {
+            try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: tmpURL.path)
+        }
+        if FileManager.default.fileExists(atPath: url.path) {
+            _ = try FileManager.default.replaceItemAt(url, withItemAt: tmpURL)
+        } else {
+            try FileManager.default.moveItem(at: tmpURL, to: url)
+        }
+        if name == "auth.json" {
+            try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+        }
     }
 
     func prettyPrinted(_ object: Any) -> String {

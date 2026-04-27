@@ -556,6 +556,15 @@ struct ToolCallCardView: View {
         return "checkmark.circle"
     }
 
+    private var resourceInstallLabel: String? {
+        let text = "\(tool.name) \(tool.args) \(tool.output)".lowercased()
+        if text.contains("mcp.json") || text.contains("mcp server") { return "MCP configuration" }
+        if text.contains("skill") || text.contains("/skills") { return "Skill install" }
+        if text.contains("extension") || text.contains("/extensions") { return "Extension install" }
+        if text.contains("pi install") || text.contains("npm install") || text.contains("settings.json") { return "Pi resource change" }
+        return nil
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             // Header
@@ -585,9 +594,16 @@ struct ToolCallCardView: View {
                             }
                     }
 
-                    Text(tool.name)
-                        .font(DS.mono(11, weight: .medium))
-                        .foregroundStyle(DS.Colors.textSecondary)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(tool.name)
+                            .font(DS.mono(11, weight: .medium))
+                            .foregroundStyle(DS.Colors.textSecondary)
+                        if let resourceInstallLabel {
+                            Label(resourceInstallLabel, systemImage: "shippingbox.and.arrow.backward")
+                                .font(DS.body(9, weight: .semibold))
+                                .foregroundStyle(DS.Colors.green)
+                        }
+                    }
 
                     if tool.isRunning {
                         TypingIndicator()

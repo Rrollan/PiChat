@@ -1,6 +1,6 @@
 {
   "name": "pichat-windows",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Windows desktop client for PiChat / pi coding agent",
   "private": true,
   "main": "dist/main/main.js",

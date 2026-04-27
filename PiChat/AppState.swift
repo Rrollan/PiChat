@@ -114,8 +114,12 @@ class AppState: ObservableObject {
     @Published var notification: AppNotification?
     @Published var isOAuthLoginRunning: Bool = false
     @Published var oauthLoginStatusText: String?
+    @Published var oauthAuthURLString: String?
+    @Published var oauthAuthInstructions: String?
+    @Published var oauthVerificationCode: String?
     @Published var oauthPromptMessage: String?
     @Published var oauthPromptPlaceholder: String?
+    @Published var oauthPromptAllowsEmpty: Bool = false
     @Published var oauthPromptInput: String = ""
 
     // MARK: Keyboard / Action Feedback
@@ -140,6 +144,7 @@ class AppState: ObservableObject {
     @Published var settingsJSONText: String = "{}"
     @Published var modelsJSONText: String = "{}"
     @Published var authJSONText: String = "{}"
+    @Published var mcpJSONText: String = "{}"
     @Published var authEntries: [PiAuthEntry] = []
     @Published var mcpServers: [MCPServerEntry] = []
 
@@ -452,8 +457,9 @@ class AppState: ObservableObject {
             default: break
             }
 
-        case .toolExecutionStart(let tcId, let tn, _):
-            let tool = ToolCall(id: tcId, name: tn, args: "", output: "", isError: false, isRunning: true)
+        case .toolExecutionStart(let tcId, let tn, let args):
+            let argsText = args.map { String(describing: $0.value) } ?? ""
+            let tool = ToolCall(id: tcId, name: tn, args: argsText, output: "", isError: false, isRunning: true)
             activeTools.append(tool)
             activeToolCallMap[tcId] = activeTools.count - 1
 
@@ -486,6 +492,9 @@ class AppState: ObservableObject {
                     messages[msgIdx].toolCalls[tIdx].isRunning = false
                 }
             }
+            let argsText = activeTools.first(where: { $0.id == tcId })?.args ?? ""
+            refreshResourcesAfterAgentInstallIfNeeded(toolName: activeTools.first(where: { $0.id == tcId })?.name ?? "", args: argsText, output: result, isError: isErr)
+
             activeToolCallMap.removeValue(forKey: tcId)
             // Remove from active after short delay
             DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
@@ -654,8 +663,12 @@ class AppState: ObservableObject {
 
         isOAuthLoginRunning = true
         oauthLoginStatusText = "Starting authentication for \(providerId)…"
+        oauthAuthURLString = nil
+        oauthAuthInstructions = nil
+        oauthVerificationCode = nil
         oauthPromptMessage = nil
         oauthPromptPlaceholder = nil
+        oauthPromptAllowsEmpty = false
         oauthPromptInput = ""
 
         defer {
@@ -667,8 +680,12 @@ class AppState: ObservableObject {
         do {
             try await runOAuthLogin(providerId: providerId)
             loadConfigFiles()
+            oauthAuthURLString = nil
+            oauthAuthInstructions = nil
+            oauthVerificationCode = nil
             oauthPromptMessage = nil
             oauthPromptPlaceholder = nil
+            oauthPromptAllowsEmpty = false
             oauthPromptInput = ""
             oauthLoginStatusText = "Authentication completed: \(providerId). Refreshing models…"
             if isConnected {
@@ -688,7 +705,7 @@ class AppState: ObservableObject {
     func submitOAuthPromptInput() {
         guard let handle = oauthHelperInputHandle else { return }
         let text = oauthPromptInput.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { return }
+        guard oauthPromptAllowsEmpty || !text.isEmpty else { return }
 
         let line = text + "\n"
         if let data = line.data(using: .utf8) {
@@ -697,6 +714,7 @@ class AppState: ObservableObject {
             oauthLoginStatusText = "Submitted verification input…"
             oauthPromptMessage = nil
             oauthPromptPlaceholder = nil
+            oauthPromptAllowsEmpty = false
         }
     }
 
@@ -705,6 +723,12 @@ class AppState: ObservableObject {
         oauthHelperProcess = nil
         oauthHelperInputHandle = nil
         isOAuthLoginRunning = false
+        oauthAuthURLString = nil
+        oauthAuthInstructions = nil
+        oauthVerificationCode = nil
+        oauthPromptMessage = nil
+        oauthPromptPlaceholder = nil
+        oauthPromptAllowsEmpty = false
         oauthLoginStatusText = "Authentication cancelled"
     }
 
@@ -730,7 +754,7 @@ try {
     onAuth: (info) => send({ type: 'auth', url: info?.url ?? '', instructions: info?.instructions ?? '' }),
     onProgress: (message) => send({ type: 'progress', message: message ?? '' }),
     onPrompt: async (prompt) => {
-      send({ type: 'prompt', message: prompt?.message ?? 'Enter the requested value', placeholder: prompt?.placeholder ?? '' });
+      send({ type: 'prompt', message: prompt?.message ?? 'Enter the requested value', placeholder: prompt?.placeholder ?? '', allowEmpty: Boolean(prompt?.allowEmpty) });
       return await readInputLine();
     },
     onManualCodeInput: async () => {
@@ -804,11 +828,16 @@ try {
             }
         }
 
-        try process.run()
-
-        let status = await withCheckedContinuation { (continuation: CheckedContinuation<Int32, Never>) in
+        let status = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Int32, Error>) in
             process.terminationHandler = { proc in
                 continuation.resume(returning: proc.terminationStatus)
+            }
+
+            do {
+                try process.run()
+            } catch {
+                process.terminationHandler = nil
+                continuation.resume(throwing: error)
             }
         }
 
@@ -854,9 +883,20 @@ try {
 
         switch type {
         case "auth":
+            let instructions = (obj["instructions"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+            oauthAuthInstructions = instructions?.isEmpty == false ? instructions : nil
+            oauthVerificationCode = extractVerificationCode(from: instructions)
+
             if let urlString = obj["url"] as? String, let url = URL(string: urlString), !urlString.isEmpty {
+                oauthAuthURLString = urlString
                 NSWorkspace.shared.open(url)
-                oauthLoginStatusText = "Browser opened. Complete authentication, then paste verification data below if requested."
+                if let code = oauthVerificationCode {
+                    oauthLoginStatusText = "Browser opened. Enter code \(code) on GitHub."
+                } else if let instructions, !instructions.isEmpty {
+                    oauthLoginStatusText = instructions
+                } else {
+                    oauthLoginStatusText = "Browser opened. Complete authentication, then paste verification data below if requested."
+                }
             }
 
         case "progress":
@@ -868,12 +908,17 @@ try {
             if let message = obj["message"] as? String, !message.isEmpty {
                 oauthPromptMessage = message
                 oauthPromptPlaceholder = obj["placeholder"] as? String
+                oauthPromptAllowsEmpty = (obj["allowEmpty"] as? Bool) ?? false
                 oauthLoginStatusText = message
             }
 
         case "done":
+            oauthAuthURLString = nil
+            oauthAuthInstructions = nil
+            oauthVerificationCode = nil
             oauthPromptMessage = nil
             oauthPromptPlaceholder = nil
+            oauthPromptAllowsEmpty = false
 
         case "error":
             if let message = obj["message"] as? String, !message.isEmpty {
@@ -884,6 +929,37 @@ try {
         default:
             break
         }
+    }
+
+    private func extractVerificationCode(from instructions: String?) -> String? {
+        guard let instructions else { return nil }
+        let patterns = [
+            #"(?i)code:\s*([A-Z0-9-]{4,})"#,
+            #"\b([A-Z0-9]{4}-[A-Z0-9]{4})\b"#,
+            #"\b([A-Z0-9]{8})\b"#
+        ]
+
+        for pattern in patterns {
+            guard let regex = try? NSRegularExpression(pattern: pattern) else { continue }
+            let range = NSRange(instructions.startIndex..<instructions.endIndex, in: instructions)
+            if let match = regex.firstMatch(in: instructions, range: range), match.numberOfRanges > 1,
+               let codeRange = Range(match.range(at: 1), in: instructions) {
+                return String(instructions[codeRange])
+            }
+        }
+        return nil
+    }
+
+    func copyOAuthVerificationCode() {
+        guard let code = oauthVerificationCode else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(code, forType: .string)
+        show(notification: AppNotification(message: "Verification code copied", type: .success))
+    }
+
+    func openOAuthAuthURL() {
+        guard let urlString = oauthAuthURLString, let url = URL(string: urlString) else { return }
+        NSWorkspace.shared.open(url)
     }
 
     func abortCurrentOperation() async {
@@ -905,6 +981,10 @@ try {
 
     func refreshCommands() async {
         commands = (try? await rpc.getCommands()) ?? []
+    }
+
+    func refreshModels() async {
+        availableModels = (try? await rpc.getAvailableModels()) ?? availableModels
     }
 
     func startNewSession() async {
@@ -1730,6 +1810,7 @@ try {
         settingsJSONText = configManager.readRawFile(named: "settings.json", defaultContent: "{}")
         modelsJSONText = configManager.readRawFile(named: "models.json", defaultContent: "{\n  \"providers\": {}\n}")
         authJSONText = configManager.readRawFile(named: "auth.json", defaultContent: "{}")
+        mcpJSONText = configManager.readRawFile(named: "mcp.json", defaultContent: "{}")
         authEntries = configManager.loadAuthEntries()
         mcpServers = configManager.loadMCPServers()
 
@@ -1738,7 +1819,6 @@ try {
 
     func saveSettingsJSON() {
         do {
-            _ = try JSONSerialization.jsonObject(with: Data(settingsJSONText.utf8))
             try configManager.writeRawFile(named: "settings.json", content: settingsJSONText)
             applySettingsFormFromJSON()
             show(notification: AppNotification(message: "settings.json saved", type: .success))
@@ -1754,7 +1834,6 @@ try {
 
     func saveModelsJSON() {
         do {
-            _ = try JSONSerialization.jsonObject(with: Data(modelsJSONText.utf8))
             try configManager.writeRawFile(named: "models.json", content: modelsJSONText)
             show(notification: AppNotification(message: "models.json saved", type: .success))
             Task { await reconnect() }
@@ -1765,13 +1844,23 @@ try {
 
     func saveAuthJSON() {
         do {
-            _ = try JSONSerialization.jsonObject(with: Data(authJSONText.utf8))
             try configManager.writeRawFile(named: "auth.json", content: authJSONText)
             authEntries = configManager.loadAuthEntries()
             show(notification: AppNotification(message: "auth.json saved", type: .success))
             Task { await reconnect() }
         } catch {
             show(notification: AppNotification(message: "auth.json error: \(error.localizedDescription)", type: .error))
+        }
+    }
+
+    func saveMCPJSON() {
+        do {
+            try configManager.writeRawFile(named: "mcp.json", content: mcpJSONText)
+            mcpServers = configManager.loadMCPServers()
+            show(notification: AppNotification(message: "mcp.json saved", type: .success))
+            Task { await reconnect() }
+        } catch {
+            show(notification: AppNotification(message: "mcp.json error: \(error.localizedDescription)", type: .error))
         }
     }
 
@@ -1826,6 +1915,55 @@ try {
             if isConnected { Task { await reconnect() } }
         } catch {
             show(notification: AppNotification(message: "Failed to add model: \(error.localizedDescription)", type: .error))
+        }
+    }
+
+    func addPiResource(kind: PiResourceKind, value: String) {
+        let item = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !item.isEmpty else {
+            show(notification: AppNotification(message: "Enter a package, file, or directory", type: .warning))
+            return
+        }
+        mutateSettingsArray(key: kind.settingsKey, item: item, removing: false)
+    }
+
+    func removePiResource(kind: PiResourceKind, value: String) {
+        let item = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !item.isEmpty else { return }
+        mutateSettingsArray(key: kind.settingsKey, item: item, removing: true)
+    }
+
+    private func mutateSettingsArray(key: String, item: String, removing: Bool) {
+        do {
+            var root = (try configManager.readJsonFile(named: "settings.json", defaultObject: [:])) as? [String: Any] ?? [:]
+            let existing = root[key] as? [Any] ?? []
+            let filtered = existing.filter { value in
+                guard let string = value as? String else { return true }
+                return string != item
+            }
+            root[key] = removing ? filtered : filtered + [item]
+            settingsJSONText = configManager.prettyPrinted(root)
+            try configManager.writeRawFile(named: "settings.json", content: settingsJSONText)
+            loadConfigFiles()
+            show(notification: AppNotification(message: removing ? "Removed from \(key): \(item)" : "Added to \(key): \(item)", type: .success))
+            if isConnected { Task { await reconnect() } }
+        } catch {
+            show(notification: AppNotification(message: "Failed to update \(key): \(error.localizedDescription)", type: .error))
+        }
+    }
+
+    private func refreshResourcesAfterAgentInstallIfNeeded(toolName: String, args: String, output: String, isError: Bool) {
+        guard !isError else { return }
+        let text = "\(toolName)\n\(args)\n\(output)".lowercased()
+        let markers = ["settings.json", "mcp.json", "auth.json", "models.json", "/skills", "/extensions", "pi install", "pi config", "npm install"]
+        guard markers.contains(where: { text.contains($0) }) else { return }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+            self.loadConfigFiles()
+            Task {
+                await self.refreshCommands()
+                await self.refreshModels()
+            }
         }
     }
 
@@ -1928,6 +2066,47 @@ struct AppUpdateInfo: Identifiable, Equatable {
     let tagName: String
     let downloadURL: String
     let releaseURL: String
+}
+
+enum PiResourceKind: String, CaseIterable, Identifiable {
+    case packages
+    case extensions
+    case skills
+    case prompts
+    case themes
+
+    var id: String { rawValue }
+    var settingsKey: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .packages: return "Package"
+        case .extensions: return "Extension"
+        case .skills: return "Skill"
+        case .prompts: return "Prompt"
+        case .themes: return "Theme"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .packages: return "shippingbox"
+        case .extensions: return "puzzlepiece.extension"
+        case .skills: return "sparkles"
+        case .prompts: return "text.badge.star"
+        case .themes: return "paintpalette"
+        }
+    }
+
+    var help: String {
+        switch self {
+        case .packages: return "npm/git pi packages from settings.json"
+        case .extensions: return "local extension files or directories"
+        case .skills: return "local skill files or directories"
+        case .prompts: return "prompt template paths"
+        case .themes: return "theme file or directory paths"
+        }
+    }
 }
 
 struct ExtensionUIRequest: Identifiable {

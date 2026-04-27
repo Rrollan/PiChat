@@ -6,11 +6,11 @@ PiChat for Windows is a native-feeling desktop app built with Electron. It runs 
 
 Use the single Windows installer from the Windows release:
 
-- **Installer EXE:** `PiChat-Windows-Setup-1.0.2-x64.exe`
+- **Installer EXE:** `PiChat-Windows-Setup-1.0.3-x64.exe`
 
 Direct link after release publication:
 
-- https://github.com/Rrollan/PiChat/releases/download/windows-v1.0.2/PiChat-Windows-Setup-1.0.2-x64.exe
+- https://github.com/Rrollan/PiChat/releases/download/windows-v1.0.3/PiChat-Windows-Setup-1.0.3-x64.exe
 
 ## Requirements
 
@@ -20,7 +20,7 @@ Direct link after release publication:
 
 ## Simple installation
 
-1. Download `PiChat-Windows-Setup-1.0.2-x64.exe`.
+1. Download `PiChat-Windows-Setup-1.0.3-x64.exe`.
 2. Open the installer.
 3. Follow the installation steps.
 4. Launch **PiChat** from Start Menu or Desktop.

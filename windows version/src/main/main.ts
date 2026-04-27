@@ -255,7 +255,7 @@ try {
   await storage.login(providerId, {
     onAuth: (info) => send({ type: 'auth', url: info?.url ?? '', instructions: info?.instructions ?? '' }),
     onProgress: (message) => send({ type: 'progress', message: message ?? '' }),
-    onPrompt: async (prompt) => { send({ type: 'prompt', message: prompt?.message ?? 'Enter the requested value', placeholder: prompt?.placeholder ?? '' }); return await readInputLine(); },
+    onPrompt: async (prompt) => { send({ type: 'prompt', message: prompt?.message ?? 'Enter the requested value', placeholder: prompt?.placeholder ?? '', allowEmpty: Boolean(prompt?.allowEmpty) }); return await readInputLine(); },
     onManualCodeInput: async () => { send({ type: 'manual', message: 'Paste the authorization code or full redirect URL.' }); return await readInputLine(); }
   });
   send({ type: 'done' });

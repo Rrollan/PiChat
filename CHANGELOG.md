@@ -2,6 +2,26 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.0.11] - 2026-04-27
+
+### Added
+- Added OAuth verification cards with copy-code and reopen-link actions
+- Added Pi Resources settings for packages, skills, extensions, prompts, and themes
+- Added `mcp.json` to the in-app raw JSON editor
+- Highlighted likely skill/MCP/extension installs in tool cards and refresh resources after successful agent changes
+
+### Fixed
+- Fixed GitHub Copilot OAuth by showing the device verification code in PiChat
+- Allowed empty OAuth prompt submission when providers support defaults
+- Hardened pi config writes with file allowlisting, atomic writes, and private `auth.json` permissions
+
+## [Windows 1.0.3] - 2026-04-27
+
+### Fixed
+- Fixed GitHub Copilot OAuth code display in the Windows settings UI
+- Added empty/default OAuth prompt support for Windows
+- Added `mcp.json` to Windows config state and raw JSON editing
+
 ## [Windows 1.0.2] - 2026-04-27
 
 ### Changed

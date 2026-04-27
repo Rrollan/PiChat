@@ -99,6 +99,7 @@ export interface ConfigState {
   settingsJSONText: string;
   modelsJSONText: string;
   authJSONText: string;
+  mcpJSONText: string;
   authEntries: PiAuthEntry[];
   mcpServers: MCPServerEntry[];
 }
