@@ -1,10 +1,12 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { randomUUID } from 'node:crypto';
 import { app } from 'electron';
-import type { ConfigState, MCPServerEntry, PiAuthEntry, RuntimeSettings } from '../shared/types';
+import type { ConfigState, MCPServerEntry, PiAccountProfile, PiAuthEntry, RuntimeSettings } from '../shared/types';
 
 const APP_SETTINGS_FILE = 'windows-settings.json';
+const ACCOUNT_PROFILES_FILE = 'pichat-accounts.json';
 const CONFIG_FILE_ALLOWLIST = new Set(['settings.json', 'models.json', 'auth.json', 'mcp.json']);
 
 export function expandHome(input: string): string {
@@ -52,6 +54,8 @@ export function loadRuntimeSettings(): RuntimeSettings {
     piConfigDirectory: saved.piConfigDirectory || defaultPiConfigDir(),
     hiddenModelKeys: saved.hiddenModelKeys || [],
     browserExtensionId: saved.browserExtensionId || '',
+    activeAccountProfileId: saved.activeAccountProfileId || '',
+    autoAccountFailoverEnabled: saved.autoAccountFailoverEnabled ?? true,
     cliNoSession: saved.cliNoSession ?? true,
     cliProvider: saved.cliProvider || '',
     cliModel: saved.cliModel || '',
@@ -119,6 +123,7 @@ export function loadConfigState(configDir: string): ConfigState {
     authJSONText,
     mcpJSONText,
     authEntries: loadAuthEntries(configDir),
+    accountProfiles: loadAccountProfiles(configDir),
     mcpServers: loadMCPServers(configDir)
   };
 }
@@ -127,6 +132,70 @@ export function maskSecret(secret: string): string {
   if (!secret) return '(empty)';
   if (secret.length <= 8) return '•'.repeat(Math.max(secret.length, 4));
   return `${secret.slice(0, 4)}••••${secret.slice(-4)}`;
+}
+
+interface StoredPiAccountProfile {
+  id: string;
+  name: string;
+  provider: string;
+  apiKey: string;
+  isEnabled: boolean;
+}
+
+function accountProfilesFile(configDir: string): string {
+  return path.join(expandHome(configDir), ACCOUNT_PROFILES_FILE);
+}
+
+function storedAccountProfiles(configDir: string): StoredPiAccountProfile[] {
+  return readJSON<StoredPiAccountProfile[]>(accountProfilesFile(configDir), []);
+}
+
+function writeAccountProfiles(configDir: string, profiles: StoredPiAccountProfile[]): void {
+  const file = accountProfilesFile(configDir);
+  fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+  atomicWrite(file, JSON.stringify(profiles.sort((a, b) => a.name.localeCompare(b.name)), null, 2));
+  try { fs.chmodSync(file, 0o600); } catch {}
+}
+
+export function loadAccountProfiles(configDir: string): PiAccountProfile[] {
+  return storedAccountProfiles(configDir).map(p => ({
+    id: p.id,
+    name: p.name,
+    provider: p.provider,
+    keyPreview: maskSecret(p.apiKey),
+    isEnabled: p.isEnabled !== false
+  }));
+}
+
+export function accountProfileSecret(configDir: string, id: string): string {
+  return storedAccountProfiles(configDir).find(p => p.id === id)?.apiKey || '';
+}
+
+export function upsertAccountProfile(configDir: string, input: { name: string; provider: string; apiKey: string; id?: string; isEnabled?: boolean }): PiAccountProfile {
+  const name = input.name.trim();
+  const provider = input.provider.trim();
+  const apiKey = input.apiKey.trim();
+  if (!name || !provider || !apiKey) throw new Error('Name, provider, and API key are required');
+  const profiles = storedAccountProfiles(configDir);
+  const id = input.id || randomUUID();
+  const stored: StoredPiAccountProfile = { id, name, provider, apiKey, isEnabled: input.isEnabled ?? true };
+  const idx = profiles.findIndex(p => p.id === id);
+  if (idx >= 0) profiles[idx] = stored;
+  else profiles.push(stored);
+  writeAccountProfiles(configDir, profiles);
+  return { id, name, provider, keyPreview: maskSecret(apiKey), isEnabled: stored.isEnabled };
+}
+
+export function setAccountProfileEnabled(configDir: string, id: string, isEnabled: boolean): void {
+  const profiles = storedAccountProfiles(configDir);
+  const idx = profiles.findIndex(p => p.id === id);
+  if (idx < 0) return;
+  profiles[idx].isEnabled = isEnabled;
+  writeAccountProfiles(configDir, profiles);
+}
+
+export function removeAccountProfile(configDir: string, id: string): void {
+  writeAccountProfiles(configDir, storedAccountProfiles(configDir).filter(p => p.id !== id));
 }
 
 export function loadAuthEntries(configDir: string): PiAuthEntry[] {

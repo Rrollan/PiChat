@@ -15,6 +15,8 @@ struct AppSettingsView: View {
     @State private var accountProvider = "anthropic"
     @State private var customAccountProvider = ""
     @State private var accountKey = ""
+    @State private var accountProfileName = ""
+    @State private var accountProfileKey = ""
 
     @State private var modelProvider = ""
     @State private var modelBaseUrl = ""
@@ -395,46 +397,162 @@ struct AppSettingsView: View {
     }
 
     private var accountCard: some View {
-        settingsCard(title: "Accounts (auth.json)", subtitle: "API key / env var / command-based auth") {
+        settingsCard(title: "Account Profiles", subtitle: "Multiple API-key accounts with automatic failover when quota or rate limits are hit") {
+            Toggle("Automatically switch to the next enabled account on 429 / quota errors", isOn: Binding<Bool>(
+                get: { state.autoAccountFailoverEnabled },
+                set: { value in
+                    state.autoAccountFailoverEnabled = value
+                    state.persistRuntimeSettings()
+                }
+            ))
+
             HStack(spacing: DS.Spacing.sm) {
-                Picker("Provider", selection: $accountProvider) {
-                    ForEach(accountProviders, id: \.self) { Text($0).tag($0) }
+                Picker("Active", selection: Binding<String>(
+                    get: { state.activeAccountProfileID ?? "" },
+                    set: { state.setActiveAccountProfile($0.isEmpty ? nil : $0) }
+                )) {
+                    Text("Use native auth / CLI flags").tag("")
+                    ForEach(state.accountProfiles) { profile in
+                        Text("\(profile.name) · \(profile.provider)").tag(profile.id)
+                    }
                 }
-                .frame(maxWidth: 220)
+                .frame(maxWidth: 360)
 
-                TextField("or custom provider id", text: $customAccountProvider)
-                    .textFieldStyle(.roundedBorder)
-
-                SecureField("API key / env var / !command", text: $accountKey)
-                    .textFieldStyle(.roundedBorder)
-
-                Button("Save") {
-                    let provider = customAccountProvider.trimmingCharacters(in: .whitespacesAndNewlines)
-                    state.upsertAccount(provider: provider.isEmpty ? accountProvider : provider, key: accountKey)
-                    accountKey = ""
+                if let active = state.activeAccountProfile {
+                    Label("Active: \(active.name)", systemImage: "person.crop.circle.badge.checkmark")
+                        .font(DS.body(11, weight: .semibold))
+                        .foregroundStyle(DS.Colors.green)
                 }
-                .buttonStyle(.borderedProminent)
             }
 
-            if state.authEntries.isEmpty {
-                Text("No saved accounts yet")
+            VStack(alignment: .leading, spacing: DS.Spacing.sm) {
+                Text("Add API-key account")
+                    .font(DS.body(12, weight: .semibold))
+                HStack(spacing: DS.Spacing.sm) {
+                    TextField("Name (Work, Personal, Backup…)", text: $accountProfileName)
+                        .textFieldStyle(.roundedBorder)
+                    Picker("Provider", selection: $accountProvider) {
+                        ForEach(accountProviders, id: \.self) { Text($0).tag($0) }
+                    }
+                    .frame(maxWidth: 220)
+                    TextField("or custom provider id", text: $customAccountProvider)
+                        .textFieldStyle(.roundedBorder)
+                    SecureField("API key", text: $accountProfileKey)
+                        .textFieldStyle(.roundedBorder)
+                    Button("Add") {
+                        let provider = customAccountProvider.trimmingCharacters(in: .whitespacesAndNewlines)
+                        state.saveAccountProfile(
+                            name: accountProfileName,
+                            provider: provider.isEmpty ? accountProvider : provider,
+                            apiKey: accountProfileKey
+                        )
+                        accountProfileName = ""
+                        accountProfileKey = ""
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
+            }
+            .padding(DS.Spacing.sm)
+            .background(DS.Colors.surfaceElevated)
+            .clipShape(RoundedRectangle(cornerRadius: DS.Radius.sm))
+            .overlay(RoundedRectangle(cornerRadius: DS.Radius.sm).stroke(DS.Colors.border, lineWidth: 1))
+
+            if state.accountProfiles.isEmpty {
+                Text("No profiles yet. Add OpenAI/ChatGPT, Gemini, Anthropic or custom API-key accounts above.")
                     .font(DS.body(11))
                     .foregroundStyle(DS.Colors.textTertiary)
             } else {
-                ForEach(state.authEntries) { entry in
-                    HStack {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(entry.provider).font(DS.mono(11, weight: .semibold))
-                            Text("\(entry.type): \(entry.keyPreview)").font(DS.mono(10)).foregroundStyle(DS.Colors.textTertiary)
-                        }
-                        Spacer()
-                        Button("Delete") { state.removeAccount(provider: entry.provider) }
-                            .buttonStyle(.bordered)
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 260), spacing: 10)], spacing: 10) {
+                    ForEach(state.accountProfiles) { profile in
+                        accountProfileRow(profile)
                     }
-                    .padding(.vertical, 2)
                 }
             }
+
+            DisclosureGroup("Native auth.json accounts") {
+                VStack(alignment: .leading, spacing: DS.Spacing.sm) {
+                    HStack(spacing: DS.Spacing.sm) {
+                        Picker("Provider", selection: $accountProvider) {
+                            ForEach(accountProviders, id: \.self) { Text($0).tag($0) }
+                        }
+                        .frame(maxWidth: 220)
+
+                        TextField("or custom provider id", text: $customAccountProvider)
+                            .textFieldStyle(.roundedBorder)
+
+                        SecureField("API key / env var / !command", text: $accountKey)
+                            .textFieldStyle(.roundedBorder)
+
+                        Button("Save") {
+                            let provider = customAccountProvider.trimmingCharacters(in: .whitespacesAndNewlines)
+                            state.upsertAccount(provider: provider.isEmpty ? accountProvider : provider, key: accountKey)
+                            accountKey = ""
+                        }
+                        .buttonStyle(.borderedProminent)
+                    }
+
+                    if state.authEntries.isEmpty {
+                        Text("No native auth.json accounts yet")
+                            .font(DS.body(11))
+                            .foregroundStyle(DS.Colors.textTertiary)
+                    } else {
+                        ForEach(state.authEntries) { entry in
+                            HStack {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(entry.provider).font(DS.mono(11, weight: .semibold))
+                                    Text("\(entry.type): \(entry.keyPreview)").font(DS.mono(10)).foregroundStyle(DS.Colors.textTertiary)
+                                }
+                                Spacer()
+                                Button("Delete") { state.removeAccount(provider: entry.provider) }
+                                    .buttonStyle(.bordered)
+                            }
+                            .padding(.vertical, 2)
+                        }
+                    }
+                }
+                .padding(.top, DS.Spacing.sm)
+            }
         }
+    }
+
+    private func accountProfileRow(_ profile: PiAccountProfile) -> some View {
+        VStack(alignment: .leading, spacing: DS.Spacing.sm) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(profile.name)
+                        .font(DS.body(12, weight: .semibold))
+                        .foregroundStyle(DS.Colors.textPrimary)
+                    Text(profile.provider)
+                        .font(DS.mono(10))
+                        .foregroundStyle(DS.Colors.textTertiary)
+                }
+                Spacer()
+                if state.activeAccountProfileID == profile.id {
+                    Image(systemName: "checkmark.seal.fill")
+                        .foregroundStyle(DS.Colors.green)
+                }
+            }
+            Text("Key: \(profile.keyPreview)")
+                .font(DS.mono(10))
+                .foregroundStyle(DS.Colors.textSecondary)
+            HStack {
+                Toggle("Enabled", isOn: Binding<Bool>(
+                    get: { profile.isEnabled },
+                    set: { state.setAccountProfileEnabled(profile, enabled: $0) }
+                ))
+                .toggleStyle(.checkbox)
+                Spacer()
+                Button("Use") { state.setActiveAccountProfile(profile.id) }
+                    .buttonStyle(.bordered)
+                    .disabled(!profile.isEnabled)
+                Button("Delete") { state.removeAccountProfile(profile) }
+                    .buttonStyle(.bordered)
+            }
+        }
+        .padding(DS.Spacing.sm)
+        .background(DS.Colors.surfaceElevated)
+        .clipShape(RoundedRectangle(cornerRadius: DS.Radius.sm))
+        .overlay(RoundedRectangle(cornerRadius: DS.Radius.sm).stroke(DS.Colors.border, lineWidth: 1))
     }
 
     private var modelVisibilityCard: some View {

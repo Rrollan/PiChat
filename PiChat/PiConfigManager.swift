@@ -7,6 +7,32 @@ struct PiAuthEntry: Identifiable {
     let keyPreview: String
 }
 
+struct PiAccountProfile: Identifiable, Codable, Equatable {
+    let id: String
+    var name: String
+    var provider: String
+    var keyPreview: String
+    var isEnabled: Bool
+}
+
+private struct StoredPiAccountProfile: Identifiable, Codable {
+    let id: String
+    var name: String
+    var provider: String
+    var apiKey: String
+    var isEnabled: Bool
+
+    var publicProfile: PiAccountProfile {
+        PiAccountProfile(
+            id: id,
+            name: name,
+            provider: provider,
+            keyPreview: PiConfigManager.mask(secret: apiKey),
+            isEnabled: isEnabled
+        )
+    }
+}
+
 struct MCPServerEntry: Identifiable {
     let id: String
     let name: String
@@ -31,6 +57,10 @@ struct PiConfigManager {
 
     func filePath(_ name: String) -> String {
         URL(fileURLWithPath: configDir).appendingPathComponent(name).path
+    }
+
+    private var accountProfilesURL: URL {
+        URL(fileURLWithPath: configDir).appendingPathComponent("pichat-accounts.json")
     }
 
     func validateConfigFileName(_ name: String) throws {
@@ -93,6 +123,75 @@ struct PiConfigManager {
             return "{}"
         }
         return text
+    }
+
+    func loadAccountProfiles() -> [PiAccountProfile] {
+        loadStoredAccountProfiles().map(\.publicProfile)
+    }
+
+    func accountProfileSecret(id: String) -> String? {
+        loadStoredAccountProfiles().first(where: { $0.id == id })?.apiKey
+    }
+
+    func upsertAccountProfile(id: String? = nil, name: String, provider: String, apiKey: String, isEnabled: Bool = true) throws -> PiAccountProfile {
+        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedProvider = provider.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedName.isEmpty, !trimmedProvider.isEmpty, !trimmedKey.isEmpty else {
+            throw CocoaError(.fileWriteInvalidFileName)
+        }
+
+        var profiles = loadStoredAccountProfiles()
+        let profileID = id ?? UUID().uuidString
+        let stored = StoredPiAccountProfile(
+            id: profileID,
+            name: trimmedName,
+            provider: trimmedProvider,
+            apiKey: trimmedKey,
+            isEnabled: isEnabled
+        )
+        if let index = profiles.firstIndex(where: { $0.id == profileID }) {
+            profiles[index] = stored
+        } else {
+            profiles.append(stored)
+        }
+        try writeStoredAccountProfiles(profiles)
+        return stored.publicProfile
+    }
+
+    func setAccountProfileEnabled(id: String, isEnabled: Bool) throws {
+        var profiles = loadStoredAccountProfiles()
+        guard let index = profiles.firstIndex(where: { $0.id == id }) else { return }
+        profiles[index].isEnabled = isEnabled
+        try writeStoredAccountProfiles(profiles)
+    }
+
+    func removeAccountProfile(id: String) throws {
+        var profiles = loadStoredAccountProfiles()
+        profiles.removeAll { $0.id == id }
+        try writeStoredAccountProfiles(profiles)
+    }
+
+    private func loadStoredAccountProfiles() -> [StoredPiAccountProfile] {
+        let url = accountProfilesURL
+        guard let data = FileManager.default.contents(atPath: url.path), !data.isEmpty else { return [] }
+        return (try? JSONDecoder().decode([StoredPiAccountProfile].self, from: data)) ?? []
+    }
+
+    private func writeStoredAccountProfiles(_ profiles: [StoredPiAccountProfile]) throws {
+        let url = accountProfilesURL
+        let parent = url.deletingLastPathComponent()
+        try FileManager.default.createDirectory(at: parent, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        let data = try JSONEncoder().encode(profiles.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending })
+        let tmpURL = parent.appendingPathComponent(".\(url.lastPathComponent).\(UUID().uuidString).tmp")
+        try data.write(to: tmpURL, options: .atomic)
+        try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: tmpURL.path)
+        if FileManager.default.fileExists(atPath: url.path) {
+            _ = try FileManager.default.replaceItemAt(url, withItemAt: tmpURL)
+        } else {
+            try FileManager.default.moveItem(at: tmpURL, to: url)
+        }
+        try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
     }
 
     func loadAuthEntries() -> [PiAuthEntry] {

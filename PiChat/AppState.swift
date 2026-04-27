@@ -226,9 +226,16 @@ class AppState: ObservableObject {
     @Published var isRetrying = false
     @Published var retryMessage: String?
 
+    // MARK: Account Profiles / Failover
+    @Published var accountProfiles: [PiAccountProfile] = []
+    @Published var activeAccountProfileID: String?
+    @Published var autoAccountFailoverEnabled: Bool
+    private var skippedAccountProfileIDs = Set<String>()
+
     // MARK: App Update
     @Published var isCheckingForUpdates = false
     @Published var availableAppUpdate: AppUpdateInfo?
+    private var dismissedAppUpdateTagThisLaunch: String?
 
     // MARK: Browser Assistant
     @Published var browserExtensionId: String = ""
@@ -265,6 +272,8 @@ class AppState: ObservableObject {
         self.startupDirectory = defaults.string(forKey: "pi.runtime.startupDirectory") ?? NSHomeDirectory()
         self.piConfigDirectory = defaults.string(forKey: "pi.runtime.configDirectory") ?? PiConfigManager.defaultConfigDir()
         self.piRuntimeAutoUpdatesEnabled = defaults.object(forKey: "pi.runtime.autoUpdatesEnabled") as? Bool ?? true
+        self.activeAccountProfileID = defaults.string(forKey: "pi.account.activeProfileID")
+        self.autoAccountFailoverEnabled = defaults.object(forKey: "pi.account.autoFailoverEnabled") as? Bool ?? true
         self.cliNoSession = defaults.object(forKey: "pi.cli.noSession") as? Bool ?? true
         self.cliProvider = defaults.string(forKey: "pi.cli.provider") ?? ""
         self.cliModel = defaults.string(forKey: "pi.cli.model") ?? ""
@@ -292,6 +301,7 @@ class AppState: ObservableObject {
         refreshBrowserBridgeStatus()
         setupEventHandling()
         loadConfigFiles()
+        loadAccountProfiles()
         refreshPiRuntimeStatus()
     }
 
@@ -377,12 +387,16 @@ class AppState: ObservableObject {
         configurePiRuntime(for: piPath)
     }
 
-    func disconnect() {
+    func disconnect(clearMessages: Bool = true) {
         responseWatchdogTask?.cancel()
         rpc.stop()
         isConnected = false
-        messages.removeAll()
+        if clearMessages {
+            messages.removeAll()
+        }
         activeTools.removeAll()
+        activeToolCallMap.removeAll()
+        currentAssistantMessageIndex = nil
     }
 
     func changeProject(newDirectory: String) async {
@@ -639,18 +653,86 @@ class AppState: ObservableObject {
         isWaitingForResponse = true
         startResponseWatchdog()
 
+        let assistantIndex = currentAssistantMessageIndex
         do {
             try await rpc.prompt(promptText, images: images)
         } catch {
             responseWatchdogTask?.cancel()
+            if await retryPromptAfterAccountFailover(
+                promptText: promptText,
+                images: images,
+                failedError: error.localizedDescription,
+                assistantIndex: assistantIndex
+            ) {
+                return
+            }
             isWaitingForResponse = false
-            if let idx = currentAssistantMessageIndex, messages.indices.contains(idx), messages[idx].text.isEmpty, messages[idx].thinkingText.isEmpty {
+            if let idx = assistantIndex, messages.indices.contains(idx), messages[idx].text.isEmpty, messages[idx].thinkingText.isEmpty {
                 messages[idx].isStreaming = false
             }
             currentAssistantMessageIndex = nil
             logAgentError(error.localizedDescription, context: "prompt_send")
             addSystemMessage("❌ \(error.localizedDescription)")
         }
+    }
+
+    private func retryPromptAfterAccountFailover(promptText: String, images: [RPCImage], failedError: String, assistantIndex: Int?) async -> Bool {
+        guard autoAccountFailoverEnabled, isQuotaOrRateLimitError(failedError) else { return false }
+        guard let nextProfile = nextAccountProfileForFailover() else { return false }
+
+        if let activeAccountProfileID {
+            skippedAccountProfileIDs.insert(activeAccountProfileID)
+        }
+        activeAccountProfileID = nextProfile.id
+        persistRuntimeSettings()
+
+        let previousModel = currentModel
+        addSystemMessage("↪️ Limit reached. Switching to \(nextProfile.name) (\(nextProfile.provider)) and retrying…")
+        show(notification: AppNotification(message: "Switching account: \(nextProfile.name)", type: .warning))
+
+        disconnect(clearMessages: false)
+        await connect(piPath: piPath, workingDirectory: startupDirectory)
+        if let previousModel, normalizeProviderID(previousModel.provider) == normalizeProviderID(nextProfile.provider) {
+            try? await rpc.setModel(provider: previousModel.provider, modelId: previousModel.id)
+            currentModel = previousModel
+        }
+
+        guard isConnected else { return false }
+        if let idx = assistantIndex, messages.indices.contains(idx) {
+            messages[idx].isStreaming = true
+            currentAssistantMessageIndex = idx
+        }
+        isWaitingForResponse = true
+        startResponseWatchdog()
+
+        do {
+            try await rpc.prompt(promptText, images: images)
+            return true
+        } catch {
+            logAgentError(error.localizedDescription, context: "prompt_failover_retry")
+            return false
+        }
+    }
+
+    private func nextAccountProfileForFailover() -> PiAccountProfile? {
+        let activeID = activeAccountProfileID
+        let preferredProvider = activeAccountProfile?.provider ?? currentModel?.provider ?? cliProvider
+        let enabled = accountProfiles.filter { profile in
+            profile.isEnabled && profile.id != activeID && !skippedAccountProfileIDs.contains(profile.id)
+        }
+        if !preferredProvider.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+           let sameProvider = enabled.first(where: { normalizeProviderID($0.provider) == normalizeProviderID(preferredProvider) }) {
+            return sameProvider
+        }
+        return enabled.first
+    }
+
+    private func isQuotaOrRateLimitError(_ message: String) -> Bool {
+        let lowered = message.lowercased()
+        return [
+            "rate limit", "ratelimit", "too many requests", "429", "quota", "insufficient_quota",
+            "resource_exhausted", "limit exceeded", "usage limit", "capacity", "overloaded"
+        ].contains { lowered.contains($0) }
     }
 
     func startProviderLogin(_ provider: String?) async {
@@ -1012,8 +1094,18 @@ try {
         }
     }
 
+    var activeAccountProfile: PiAccountProfile? {
+        guard let activeAccountProfileID else { return nil }
+        return accountProfiles.first(where: { $0.id == activeAccountProfileID && $0.isEnabled })
+    }
+
+    private func activeAccountProfileForLaunch() -> PiAccountProfile? {
+        activeAccountProfile
+    }
+
     var connectedProviderIDs: Set<String> {
         var providers = Set(authEntries.map { normalizeProviderID($0.provider) })
+        providers.formUnion(accountProfiles.filter { $0.isEnabled }.map { normalizeProviderID($0.provider) })
         providers.formUnion(configuredModelProviderIDs())
 
         let trimmedCLIProvider = cliProvider.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1269,20 +1361,31 @@ try {
 
     func checkForPiChatUpdateIfNeeded() async {
         let defaults = UserDefaults.standard
-        let last = defaults.object(forKey: "pichat.update.lastAutomaticCheck") as? Date
+        let last = defaults.object(forKey: automaticAppUpdateCheckKey) as? Date
         if let last, Date().timeIntervalSince(last) < 6 * 60 * 60 { return }
-        defaults.set(Date(), forKey: "pichat.update.lastAutomaticCheck")
-        await checkForPiChatUpdate(showNoUpdateNotification: false, respectDismissedVersion: true)
+        await checkForPiChatUpdate(
+            showNoUpdateNotification: false,
+            respectDismissedVersion: true,
+            recordAutomaticCheck: true
+        )
     }
 
     @discardableResult
-    func checkForPiChatUpdate(showNoUpdateNotification: Bool = true, respectDismissedVersion: Bool = false) async -> Bool {
+    func checkForPiChatUpdate(
+        showNoUpdateNotification: Bool = true,
+        respectDismissedVersion: Bool = false,
+        recordAutomaticCheck: Bool = false
+    ) async -> Bool {
         guard !isCheckingForUpdates else { return false }
         isCheckingForUpdates = true
         defer { isCheckingForUpdates = false }
 
         do {
             let release = try await fetchLatestGitHubRelease()
+            if recordAutomaticCheck {
+                UserDefaults.standard.set(Date(), forKey: automaticAppUpdateCheckKey)
+            }
+
             let currentVersion = normalizedVersionString(appVersion)
             let latestVersion = normalizedVersionString(release.tagName)
 
@@ -1295,7 +1398,7 @@ try {
             }
 
             if respectDismissedVersion,
-               UserDefaults.standard.string(forKey: "pichat.update.dismissedTag") == release.tagName {
+               dismissedAppUpdateTagThisLaunch == release.tagName {
                 return true
             }
 
@@ -1333,13 +1436,17 @@ try {
 
     func dismissAvailableAppUpdate() {
         if let update = availableAppUpdate {
-            UserDefaults.standard.set(update.tagName, forKey: "pichat.update.dismissedTag")
+            dismissedAppUpdateTagThisLaunch = update.tagName
         }
         availableAppUpdate = nil
     }
 
     private var appVersion: String {
         (Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String) ?? "0.0.0"
+    }
+
+    private var automaticAppUpdateCheckKey: String {
+        "pichat.update.lastAutomaticCheck.\(appVersion)"
     }
 
     private func fetchLatestGitHubRelease() async throws -> GitHubRelease {
@@ -1565,6 +1672,12 @@ try {
         defaults.set(startupDirectory, forKey: "pi.runtime.startupDirectory")
         defaults.set(piConfigDirectory, forKey: "pi.runtime.configDirectory")
         defaults.set(piRuntimeAutoUpdatesEnabled, forKey: "pi.runtime.autoUpdatesEnabled")
+        if let activeAccountProfileID {
+            defaults.set(activeAccountProfileID, forKey: "pi.account.activeProfileID")
+        } else {
+            defaults.removeObject(forKey: "pi.account.activeProfileID")
+        }
+        defaults.set(autoAccountFailoverEnabled, forKey: "pi.account.autoFailoverEnabled")
 
         defaults.set(cliNoSession, forKey: "pi.cli.noSession")
         defaults.set(cliProvider, forKey: "pi.cli.provider")
@@ -1592,14 +1705,21 @@ try {
         var args: [String] = []
 
         if cliNoSession { args.append("--no-session") }
-        if !cliProvider.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            args += ["--provider", cliProvider.trimmingCharacters(in: .whitespacesAndNewlines)]
+        if let activeProfile = activeAccountProfileForLaunch(),
+           let apiKey = configManager.accountProfileSecret(id: activeProfile.id),
+           !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            args += ["--provider", activeProfile.provider]
+            args += ["--api-key", apiKey.trimmingCharacters(in: .whitespacesAndNewlines)]
+        } else {
+            if !cliProvider.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                args += ["--provider", cliProvider.trimmingCharacters(in: .whitespacesAndNewlines)]
+            }
+            if !cliApiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                args += ["--api-key", cliApiKey.trimmingCharacters(in: .whitespacesAndNewlines)]
+            }
         }
         if !cliModel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             args += ["--model", cliModel.trimmingCharacters(in: .whitespacesAndNewlines)]
-        }
-        if !cliApiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            args += ["--api-key", cliApiKey.trimmingCharacters(in: .whitespacesAndNewlines)]
         }
         if !cliThinking.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             args += ["--thinking", cliThinking.trimmingCharacters(in: .whitespacesAndNewlines)]
@@ -1813,6 +1933,11 @@ try {
         mcpJSONText = configManager.readRawFile(named: "mcp.json", defaultContent: "{}")
         authEntries = configManager.loadAuthEntries()
         mcpServers = configManager.loadMCPServers()
+        accountProfiles = configManager.loadAccountProfiles()
+        if let activeAccountProfileID, !accountProfiles.contains(where: { $0.id == activeAccountProfileID }) {
+            self.activeAccountProfileID = nil
+            UserDefaults.standard.removeObject(forKey: "pi.account.activeProfileID")
+        }
 
         applySettingsFormFromJSON()
     }
@@ -1861,6 +1986,60 @@ try {
             Task { await reconnect() }
         } catch {
             show(notification: AppNotification(message: "mcp.json error: \(error.localizedDescription)", type: .error))
+        }
+    }
+
+    func loadAccountProfiles() {
+        accountProfiles = configManager.loadAccountProfiles()
+    }
+
+    func saveAccountProfile(name: String, provider: String, apiKey: String) {
+        do {
+            let profile = try configManager.upsertAccountProfile(name: name, provider: provider, apiKey: apiKey)
+            accountProfiles = configManager.loadAccountProfiles()
+            if activeAccountProfileID == nil {
+                activeAccountProfileID = profile.id
+                persistRuntimeSettings()
+            }
+            show(notification: AppNotification(message: "Account profile added: \(profile.name)", type: .success))
+            if isConnected { Task { await reconnect() } }
+        } catch {
+            show(notification: AppNotification(message: "Failed to save account profile: provider, name, and API key are required", type: .error))
+        }
+    }
+
+    func setActiveAccountProfile(_ id: String?) {
+        activeAccountProfileID = id
+        skippedAccountProfileIDs.removeAll()
+        persistRuntimeSettings()
+        if isConnected { Task { await reconnect() } }
+    }
+
+    func setAccountProfileEnabled(_ profile: PiAccountProfile, enabled: Bool) {
+        do {
+            try configManager.setAccountProfileEnabled(id: profile.id, isEnabled: enabled)
+            accountProfiles = configManager.loadAccountProfiles()
+            if !enabled && activeAccountProfileID == profile.id {
+                activeAccountProfileID = nil
+                persistRuntimeSettings()
+            }
+        } catch {
+            show(notification: AppNotification(message: "Failed to update account profile: \(error.localizedDescription)", type: .error))
+        }
+    }
+
+    func removeAccountProfile(_ profile: PiAccountProfile) {
+        do {
+            try configManager.removeAccountProfile(id: profile.id)
+            accountProfiles = configManager.loadAccountProfiles()
+            if activeAccountProfileID == profile.id {
+                activeAccountProfileID = nil
+                persistRuntimeSettings()
+            }
+            show(notification: AppNotification(message: "Account profile removed: \(profile.name)", type: .success))
+            if isConnected { Task { await reconnect() } }
+        } catch {
+            show(notification: AppNotification(message: "Failed to remove account profile: \(error.localizedDescription)", type: .error))
         }
     }
 

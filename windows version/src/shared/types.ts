@@ -61,6 +61,14 @@ export interface PiAuthEntry {
   keyPreview: string;
 }
 
+export interface PiAccountProfile {
+  id: string;
+  name: string;
+  provider: string;
+  keyPreview: string;
+  isEnabled: boolean;
+}
+
 export interface MCPServerEntry {
   id: string;
   name: string;
@@ -73,6 +81,8 @@ export interface RuntimeSettings {
   piConfigDirectory: string;
   hiddenModelKeys: string[];
   browserExtensionId: string;
+  activeAccountProfileId: string;
+  autoAccountFailoverEnabled: boolean;
   cliNoSession: boolean;
   cliProvider: string;
   cliModel: string;
@@ -101,6 +111,7 @@ export interface ConfigState {
   authJSONText: string;
   mcpJSONText: string;
   authEntries: PiAuthEntry[];
+  accountProfiles: PiAccountProfile[];
   mcpServers: MCPServerEntry[];
 }
 

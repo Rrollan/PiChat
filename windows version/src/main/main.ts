@@ -6,17 +6,22 @@ import { pathToFileURL } from 'node:url';
 import { spawn, ChildProcessWithoutNullStreams } from 'node:child_process';
 import { PiRPCClient } from './piRpcClient';
 import {
+  accountProfileSecret,
   addCustomModel,
   browserToolsExtensionPath,
   bundledPiAuthStoragePath,
   configuredModelProviderIDs,
   configFile,
   defaultPiConfigDir,
+  loadAccountProfiles,
   loadConfigState,
   loadRuntimeSettings,
   normalizeProviderID,
+  removeAccountProfile,
   removeAuth,
   saveRuntimeSettings,
+  setAccountProfileEnabled,
+  upsertAccountProfile,
   upsertApiKey,
   writeRawFile,
   expandHome
@@ -67,9 +72,15 @@ function createWindow(): void {
 function buildRpcLaunchArguments(s: RuntimeSettings): string[] {
   const args: string[] = [];
   if (s.cliNoSession) args.push('--no-session');
-  if (s.cliProvider.trim()) args.push('--provider', s.cliProvider.trim());
+  const activeProfile = loadAccountProfiles(s.piConfigDirectory).find(p => p.id === s.activeAccountProfileId && p.isEnabled);
+  const activeProfileKey = activeProfile ? accountProfileSecret(s.piConfigDirectory, activeProfile.id) : '';
+  if (activeProfile && activeProfileKey.trim()) {
+    args.push('--provider', activeProfile.provider.trim(), '--api-key', activeProfileKey.trim());
+  } else {
+    if (s.cliProvider.trim()) args.push('--provider', s.cliProvider.trim());
+    if (s.cliApiKey.trim()) args.push('--api-key', s.cliApiKey.trim());
+  }
   if (s.cliModel.trim()) args.push('--model', s.cliModel.trim());
-  if (s.cliApiKey.trim()) args.push('--api-key', s.cliApiKey.trim());
   if (s.cliThinking.trim()) args.push('--thinking', s.cliThinking.trim());
   if (s.cliModels.trim()) args.push('--models', s.cliModels.trim());
   if (s.cliSessionDir.trim()) args.push('--session-dir', s.cliSessionDir.trim());
@@ -199,8 +210,11 @@ function setupIpc(): void {
   ipcMain.handle('config:saveRaw', (_e, name: string, content: string) => { writeRawFile(settings.piConfigDirectory, name, content); return loadConfigState(settings.piConfigDirectory); });
   ipcMain.handle('config:upsertApiKey', (_e, provider: string, key: string) => { upsertApiKey(settings.piConfigDirectory, provider, key); return loadConfigState(settings.piConfigDirectory); });
   ipcMain.handle('config:removeAuth', (_e, provider: string) => { removeAuth(settings.piConfigDirectory, provider); return loadConfigState(settings.piConfigDirectory); });
+  ipcMain.handle('config:upsertAccountProfile', (_e, input: any) => { upsertAccountProfile(settings.piConfigDirectory, input); return loadConfigState(settings.piConfigDirectory); });
+  ipcMain.handle('config:setAccountProfileEnabled', (_e, id: string, enabled: boolean) => { setAccountProfileEnabled(settings.piConfigDirectory, id, enabled); if (!enabled && settings.activeAccountProfileId === id) settings = saveRuntimeSettings({ ...settings, activeAccountProfileId: '' }); return { config: loadConfigState(settings.piConfigDirectory), settings }; });
+  ipcMain.handle('config:removeAccountProfile', (_e, id: string) => { removeAccountProfile(settings.piConfigDirectory, id); if (settings.activeAccountProfileId === id) settings = saveRuntimeSettings({ ...settings, activeAccountProfileId: '' }); return { config: loadConfigState(settings.piConfigDirectory), settings }; });
   ipcMain.handle('config:addCustomModel', (_e, input: any) => { addCustomModel(settings.piConfigDirectory, input); return loadConfigState(settings.piConfigDirectory); });
-  ipcMain.handle('config:connectedProviders', () => Array.from(new Set([...loadConfigState(settings.piConfigDirectory).authEntries.map(e => normalizeProviderID(e.provider)), ...configuredModelProviderIDs(settings.piConfigDirectory)])));
+  ipcMain.handle('config:connectedProviders', () => Array.from(new Set([...loadConfigState(settings.piConfigDirectory).authEntries.map(e => normalizeProviderID(e.provider)), ...loadConfigState(settings.piConfigDirectory).accountProfiles.filter(p => p.isEnabled).map(p => normalizeProviderID(p.provider)), ...configuredModelProviderIDs(settings.piConfigDirectory)])));
 
   ipcMain.handle('dialog:chooseFiles', async () => {
     const res = await dialog.showOpenDialog(mainWindow!, { properties: ['openFile', 'multiSelections'] });

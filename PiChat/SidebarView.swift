@@ -46,9 +46,19 @@ struct SidebarView: View {
                 .padding(DS.Spacing.lg)
             }
 
+            if let update = state.availableAppUpdate {
+                AppUpdateAvailableBubble(update: update)
+                    .environmentObject(state)
+                    .padding(.horizontal, DS.Spacing.md)
+                    .padding(.bottom, DS.Spacing.sm)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                    .zIndex(1)
+            }
+
             // Bottom Actions
             SidebarActionsView()
         }
+        .animation(.spring(response: 0.34, dampingFraction: 0.82), value: state.availableAppUpdate?.id)
         .frame(width: 260)
         .background(DS.Colors.surface)
         .overlay(
@@ -576,8 +586,7 @@ struct AppUpdateAvailableBubble: View {
     @State private var shimmer = false
 
     var body: some View {
-        VStack(spacing: 0) {
-            VStack(alignment: .leading, spacing: DS.Spacing.md) {
+        VStack(alignment: .leading, spacing: DS.Spacing.md) {
                 HStack(alignment: .top, spacing: DS.Spacing.sm) {
                     ZStack {
                         Circle()
@@ -653,9 +662,9 @@ struct AppUpdateAvailableBubble: View {
                     Spacer()
                 }
             }
-            .padding(DS.Spacing.md)
-            .frame(width: 238)
-            .background(
+        .padding(DS.Spacing.md)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
                 ZStack {
                     DS.Colors.surfaceElevated
                     LinearGradient(
@@ -665,22 +674,12 @@ struct AppUpdateAvailableBubble: View {
                     )
                 }
             )
-            .clipShape(RoundedRectangle(cornerRadius: DS.Radius.lg))
-            .overlay(
-                RoundedRectangle(cornerRadius: DS.Radius.lg)
-                    .stroke(LinearGradient(colors: [DS.Colors.green.opacity(0.45), DS.Colors.border.opacity(0.75)], startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 1)
-            )
-            .shadow(color: DS.Colors.green.opacity(0.18), radius: 18, y: 8)
-
-            Triangle()
-                .fill(DS.Colors.surfaceElevated)
-                .frame(width: 18, height: 10)
-                .overlay(
-                    Triangle()
-                        .stroke(DS.Colors.border.opacity(0.65), lineWidth: 0.7)
-                )
-                .offset(x: -82, y: -1)
-        }
+        .clipShape(RoundedRectangle(cornerRadius: DS.Radius.lg))
+        .overlay(
+            RoundedRectangle(cornerRadius: DS.Radius.lg)
+                .stroke(LinearGradient(colors: [DS.Colors.green.opacity(0.45), DS.Colors.border.opacity(0.75)], startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 1)
+        )
+        .shadow(color: DS.Colors.green.opacity(0.18), radius: 18, y: 8)
         .onAppear {
             withAnimation(.easeInOut(duration: 1.6).repeatForever(autoreverses: true)) {
                 shimmer = true
@@ -725,25 +724,11 @@ struct SidebarActionsView: View {
 
             Spacer(minLength: 0)
 
-            ZStack(alignment: .top) {
-                IconButton(icon: state.isCheckingForUpdates ? "hourglass" : (state.availableAppUpdate == nil ? "arrow.down.app" : "arrow.down.app.fill"), color: DS.Colors.textSecondary, hoverColor: DS.Colors.green) {
-                    Task { await state.updateFromGitHub() }
-                }
-                .disabled(state.isCheckingForUpdates)
-                .help(state.isCheckingForUpdates ? "Checking updates..." : "Update PiChat")
-
-                if let update = state.availableAppUpdate {
-                    AppUpdateAvailableBubble(update: update)
-                        .environmentObject(state)
-                        .offset(x: 88, y: -136)
-                        .transition(.asymmetric(
-                            insertion: .scale(scale: 0.92, anchor: .bottom).combined(with: .opacity),
-                            removal: .scale(scale: 0.96, anchor: .bottom).combined(with: .opacity)
-                        ))
-                        .zIndex(20)
-                }
+            IconButton(icon: state.isCheckingForUpdates ? "hourglass" : (state.availableAppUpdate == nil ? "arrow.down.app" : "arrow.down.app.fill"), color: DS.Colors.textSecondary, hoverColor: DS.Colors.green) {
+                Task { await state.updateFromGitHub() }
             }
-            .animation(.spring(response: 0.34, dampingFraction: 0.82), value: state.availableAppUpdate?.id)
+            .disabled(state.isCheckingForUpdates)
+            .help(state.isCheckingForUpdates ? "Checking updates..." : "Update PiChat")
 
             Spacer(minLength: 0)
 
