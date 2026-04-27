@@ -65,6 +65,7 @@ export default function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [themeMode, setThemeMode] = useState(localStorage.getItem('ui.themeMode') || 'system');
   const bottomRef = useRef<HTMLDivElement>(null);
+  const currentAssistantIdRef = useRef<string | null>(null);
 
   const notify = (message: string, type: AppNotification['type'] = 'info') => {
     const next = { id: id(), message, type };
@@ -124,7 +125,7 @@ export default function App() {
   useEffect(() => {
     const off = window.pichat.onPiEvent((event: PiEvent) => handlePiEvent(event));
     return off;
-  }, [currentAssistantId]);
+  }, []);
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' }); }, [messages, isWaiting, isRetrying, isCompacting]);
   useEffect(() => {
     document.documentElement.dataset.theme = themeMode === 'system' ? (matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark') : themeMode;
@@ -132,47 +133,79 @@ export default function App() {
   }, [themeMode]);
   useEffect(() => { localStorage.setItem('ui.showRightPanel', String(showRightPanel)); }, [showRightPanel]);
 
-  const updateAssistant = (fn: (m: ChatMessage) => ChatMessage) => setMessages(prev => prev.map(m => m.id === currentAssistantId ? fn(m) : m));
+  const setCurrentAssistant = (assistantId: string | null) => {
+    currentAssistantIdRef.current = assistantId;
+    setCurrentAssistantId(assistantId);
+  };
+
+  const updateAssistantById = (assistantId: string | null, fn: (m: ChatMessage) => ChatMessage) => {
+    if (!assistantId) return;
+    setMessages(prev => prev.map(m => m.id === assistantId ? fn(m) : m));
+  };
+
   const ensureAssistant = () => {
-    let assistantId = currentAssistantId;
+    let assistantId = currentAssistantIdRef.current;
     if (!assistantId) {
-      assistantId = id();
-      setCurrentAssistantId(assistantId);
-      setMessages(prev => [...prev, { id: assistantId!, role: 'assistant', text: '', thinkingText: '', toolCalls: [], isStreaming: true, timestamp: now() }]);
+      const nextAssistantId = id();
+      assistantId = nextAssistantId;
+      setCurrentAssistant(nextAssistantId);
+      setMessages(prev => [...prev, { id: nextAssistantId, role: 'assistant', text: '', thinkingText: '', toolCalls: [], isStreaming: true, timestamp: now() }]);
     }
     return assistantId;
+  };
+
+  const resetConversationState = () => {
+    setCurrentAssistant(null);
+    setMessages([]);
+    setActiveTools([]);
+    setStreaming(false);
+    setWaiting(false);
+    setRetrying(false);
+    setRetryMessage('');
   };
 
   const handlePiEvent = (event: PiEvent) => {
     switch (event.type) {
       case 'agent_start': {
-        setWaiting(false); setStreaming(true); ensureAssistant();
-        setMessages(prev => prev.map(m => m.id === currentAssistantId ? { ...m, isStreaming: true } : m));
+        setWaiting(false); setStreaming(true);
+        const assistantId = ensureAssistant();
+        updateAssistantById(assistantId, m => ({ ...m, isStreaming: true }));
         break;
       }
-      case 'agent_end':
-        setWaiting(false); setStreaming(false); setMessages(prev => prev.map(m => m.id === currentAssistantId ? { ...m, isStreaming: false } : m)); setCurrentAssistantId(null); window.pichat.refreshStats().then(applyStats).catch(() => {}); break;
-      case 'message_update':
-        ensureAssistant();
-        if (event.deltaType === 'text_delta') updateAssistant(m => ({ ...m, text: (m.text || '') + (event.delta || '') }));
-        if (event.deltaType === 'thinking_delta') updateAssistant(m => ({ ...m, thinkingText: (m.thinkingText || '') + (event.delta || ''), showThinking: true }));
+      case 'agent_end': {
+        const assistantId = currentAssistantIdRef.current;
+        setWaiting(false); setStreaming(false);
+        updateAssistantById(assistantId, m => ({ ...m, isStreaming: false }));
+        setCurrentAssistant(null);
+        window.pichat.refreshStats().then(applyStats).catch(() => {});
         break;
+      }
+      case 'message_update': {
+        const assistantId = ensureAssistant();
+        if (event.deltaType === 'text_delta') updateAssistantById(assistantId, m => ({ ...m, text: (m.text || '') + (event.delta || '') }));
+        if (event.deltaType === 'thinking_delta') updateAssistantById(assistantId, m => ({ ...m, thinkingText: (m.thinkingText || '') + (event.delta || ''), showThinking: true }));
+        break;
+      }
       case 'tool_execution_start': {
-        ensureAssistant();
+        const assistantId = ensureAssistant();
         const tool: ToolCall = { id: event.toolCallId, name: event.toolName, args: event.args ? JSON.stringify(event.args) : '', output: '', isError: false, isRunning: true };
         setActiveTools(prev => [...prev, tool]);
-        updateAssistant(m => ({ ...m, toolCalls: [...(m.toolCalls || []), tool] }));
+        updateAssistantById(assistantId, m => ({ ...m, toolCalls: [...(m.toolCalls || []), tool] }));
         break;
       }
-      case 'tool_execution_update':
+      case 'tool_execution_update': {
+        const assistantId = currentAssistantIdRef.current;
         setActiveTools(prev => prev.map(t => t.id === event.toolCallId ? { ...t, output: event.partialText } : t));
-        updateAssistant(m => ({ ...m, toolCalls: (m.toolCalls || []).map(t => t.id === event.toolCallId ? { ...t, output: event.partialText } : t) }));
+        updateAssistantById(assistantId, m => ({ ...m, toolCalls: (m.toolCalls || []).map(t => t.id === event.toolCallId ? { ...t, output: event.partialText } : t) }));
         break;
-      case 'tool_execution_end':
+      }
+      case 'tool_execution_end': {
+        const assistantId = currentAssistantIdRef.current;
         setActiveTools(prev => prev.map(t => t.id === event.toolCallId ? { ...t, output: event.resultText, isError: event.isError, isRunning: false } : t));
         window.setTimeout(() => setActiveTools(prev => prev.filter(t => t.id !== event.toolCallId || t.isRunning)), 2000);
-        updateAssistant(m => ({ ...m, toolCalls: (m.toolCalls || []).map(t => t.id === event.toolCallId ? { ...t, output: event.resultText, isError: event.isError, isRunning: false } : t) }));
+        updateAssistantById(assistantId, m => ({ ...m, toolCalls: (m.toolCalls || []).map(t => t.id === event.toolCallId ? { ...t, output: event.resultText, isError: event.isError, isRunning: false } : t) }));
         break;
+      }
       case 'queue_update': setSteeringQueue(event.steering); setFollowUpQueue(event.followUp); break;
       case 'compaction_start': setCompacting(true); setMessages(prev => [...prev, systemMessage('🗜 Compacting context…')]); break;
       case 'compaction_end': setCompacting(false); setMessages(prev => [...prev, systemMessage('✅ Compaction complete')]); break;
@@ -202,7 +235,7 @@ export default function App() {
     const userMsg: ChatMessage = { id: id(), role: 'user', text: displayText, attachments: attachedFiles, timestamp: now() };
     const assistantId = id();
     setMessages(prev => [...prev, userMsg, { id: assistantId, role: 'assistant', text: '', thinkingText: '', toolCalls: [], timestamp: now(), isStreaming: true }]);
-    setCurrentAssistantId(assistantId);
+    setCurrentAssistant(assistantId);
     const images = attachedFiles.filter(a => a.mimeType.startsWith('image/') && a.base64Data).map(a => ({ type: 'image' as const, data: a.base64Data!, mimeType: a.mimeType }));
     setInputText(''); setAttachedFiles([]); setPastedContents([]); setWaiting(true);
     try { await window.pichat.prompt(promptText, images); } catch (e: any) { const message = e?.message || String(e); if (settings.autoAccountFailoverEnabled && /rate limit|ratelimit|too many requests|429|quota|insufficient_quota|resource_exhausted|limit exceeded|usage limit/i.test(message)) { const active = settings.activeAccountProfileId; const provider = (config.accountProfiles.find(p=>p.id===active)?.provider || currentModel?.provider || '').toLowerCase().replaceAll('_','-'); const candidates = config.accountProfiles.filter(p=>p.isEnabled && p.id!==active); const next = candidates.find(p=>p.provider.toLowerCase().replaceAll('_','-')===provider) || candidates[0]; if (next) { notify(`Switching account: ${next.name}`, 'warning'); setMessages(prev => [...prev, systemMessage(`↪️ Limit reached. Switching to ${next.name} (${next.provider}) and retrying…`)]); const nextSettings = await window.pichat.saveRuntime({activeAccountProfileId:next.id}); setSettings(nextSettings); const res = await window.pichat.reconnect(nextSettings); setConnected(true); applyRpcState(res.state); setAvailableModels(res.models || []); setCommands(res.commands || []); applyStats(res.stats); setConfig(res.config); if (currentModel && currentModel.provider.toLowerCase().replaceAll('_','-')===next.provider.toLowerCase().replaceAll('_','-')) await window.pichat.setModel(currentModel.provider,currentModel.id).catch(()=>{}); setWaiting(true); try { await window.pichat.prompt(promptText, images); return; } catch (retryError:any) { notify(retryError?.message || String(retryError), 'error'); } } } setWaiting(false); notify(message, 'error'); setMessages(prev => [...prev, systemMessage(`❌ ${message}`)]); }
@@ -226,7 +259,7 @@ export default function App() {
 
   return <div className="app-shell" onDragOver={e => e.preventDefault()} onDrop={async e => { e.preventDefault(); const paths = Array.from(e.dataTransfer.files).map((f: any) => f.path).filter(Boolean); if (paths.length) addAttachments(await window.pichat.readAttachments(paths)); }}>
     {isConnected ? <>
-      <Sidebar settings={settings} setSettings={setSettings} currentModel={currentModel} models={visibleModels} hiddenModels={hiddenModels} commands={commands} stats={stats} config={config} thinkingLevel={thinkingLevel} onModel={async m => { await window.pichat.setModel(m.provider, m.id); setCurrentModel(m); }} onThinking={async lvl => { await window.pichat.setThinkingLevel(lvl); setThinkingLevelState(lvl); }} onHideModel={async m => { const next = [...settings.hiddenModelKeys, modelKey(m)].sort(); setSettings({ ...settings, hiddenModelKeys: next }); await window.pichat.saveRuntime({ hiddenModelKeys: next }); }} onShowModel={async m => { const next = settings.hiddenModelKeys.filter(k => k !== modelKey(m)); setSettings({ ...settings, hiddenModelKeys: next }); await window.pichat.saveRuntime({ hiddenModelKeys: next }); }} onSettings={() => setShowSettings(true)} onNewSession={async () => { await window.pichat.newSession(); setMessages([]); notify('New session', 'success'); }} onCompact={async () => window.pichat.compact()} onReconnect={() => reconnect()} />
+      <Sidebar settings={settings} setSettings={setSettings} currentModel={currentModel} models={visibleModels} hiddenModels={hiddenModels} commands={commands} stats={stats} config={config} thinkingLevel={thinkingLevel} onModel={async m => { await window.pichat.setModel(m.provider, m.id); setCurrentModel(m); }} onThinking={async lvl => { await window.pichat.setThinkingLevel(lvl); setThinkingLevelState(lvl); }} onHideModel={async m => { const next = [...settings.hiddenModelKeys, modelKey(m)].sort(); setSettings({ ...settings, hiddenModelKeys: next }); await window.pichat.saveRuntime({ hiddenModelKeys: next }); }} onShowModel={async m => { const next = settings.hiddenModelKeys.filter(k => k !== modelKey(m)); setSettings({ ...settings, hiddenModelKeys: next }); await window.pichat.saveRuntime({ hiddenModelKeys: next }); }} onSettings={() => setShowSettings(true)} onNewSession={async () => { await window.pichat.newSession(); resetConversationState(); notify('New session', 'success'); }} onCompact={async () => window.pichat.compact()} onReconnect={() => reconnect()} />
       <main className="chat-pane">
         <ChatHeader sessionName={sessionName} sessionFile={sessionFile} workingDirectory={settings.startupDirectory} queues={[steeringQueue.length, followUpQueue.length]} isStreaming={isStreaming} onAbort={abort} onChooseFolder={async () => { const folder = await window.pichat.chooseFolder(); if (folder) { setSettings({ ...settings, startupDirectory: folder }); await reconnect({ startupDirectory: folder }); } }} />
         <div className="messages-scroll">

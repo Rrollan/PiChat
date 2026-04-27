@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.0.14] - 2026-04-28
+
+### Fixed
+- Fixed a macOS crash when tool execution updates arrived after active tool rows were removed or after a session reset
+- Rebuilt active tool lookup state after delayed cleanup and hardened assistant message access against stale indexes
+- Cleared transient conversation state when starting a new session so late RPC events no longer hit stale UI state
+
+## [Windows 1.0.6] - 2026-04-28
+
+### Fixed
+- Fixed stale assistant tracking across tool events in the Windows renderer so early text/tool updates are no longer dropped
+- Cleared active tool and assistant UI state on new sessions so the next response renders correctly
+- Switched Windows event updates to stable assistant IDs instead of stale render-time state
+
 ## [1.0.11] - 2026-04-27
 
 ### Added

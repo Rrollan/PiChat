@@ -316,6 +316,49 @@ class AppState: ObservableObject {
             .store(in: &cancellables)
     }
 
+    private func clearConversationTransientState(clearMessages: Bool = false) {
+        if clearMessages {
+            messages.removeAll()
+        }
+        activeTools.removeAll()
+        activeToolCallMap.removeAll()
+        currentAssistantMessageIndex = nil
+        isStreaming = false
+        isWaitingForResponse = false
+        isRetrying = false
+        retryMessage = nil
+    }
+
+    private func currentAssistantIndexIfValid() -> Int? {
+        guard let idx = currentAssistantMessageIndex,
+              messages.indices.contains(idx),
+              messages[idx].role == .assistant else {
+            currentAssistantMessageIndex = nil
+            return nil
+        }
+        return idx
+    }
+
+    private func activeToolIndex(for toolCallId: String) -> Int? {
+        if let idx = activeToolCallMap[toolCallId],
+           activeTools.indices.contains(idx),
+           activeTools[idx].id == toolCallId {
+            return idx
+        }
+
+        guard let idx = activeTools.firstIndex(where: { $0.id == toolCallId }) else {
+            activeToolCallMap.removeValue(forKey: toolCallId)
+            return nil
+        }
+
+        activeToolCallMap[toolCallId] = idx
+        return idx
+    }
+
+    private func rebuildActiveToolCallMap() {
+        activeToolCallMap = Dictionary(uniqueKeysWithValues: activeTools.enumerated().map { ($0.element.id, $0.offset) })
+    }
+
     // MARK: - Connect / Disconnect
 
     func connect(piPath: String? = nil, workingDirectory: String? = nil) async {
@@ -391,12 +434,7 @@ class AppState: ObservableObject {
         responseWatchdogTask?.cancel()
         rpc.stop()
         isConnected = false
-        if clearMessages {
-            messages.removeAll()
-        }
-        activeTools.removeAll()
-        activeToolCallMap.removeAll()
-        currentAssistantMessageIndex = nil
+        clearConversationTransientState(clearMessages: clearMessages)
     }
 
     func changeProject(newDirectory: String) async {
@@ -453,7 +491,7 @@ class AppState: ObservableObject {
         case .agentEnd:
             isWaitingForResponse = false
             isStreaming = false
-            if let idx = currentAssistantMessageIndex {
+            if let idx = currentAssistantIndexIfValid() {
                 messages[idx].isStreaming = false
             }
             currentAssistantMessageIndex = nil
@@ -461,7 +499,7 @@ class AppState: ObservableObject {
             Task { await refreshStats() }
 
         case .messageUpdate(let delta):
-            guard let idx = currentAssistantMessageIndex else { return }
+            guard let idx = currentAssistantIndexIfValid() else { return }
             switch delta.type {
             case "text_delta":
                 messages[idx].text += delta.delta ?? ""
@@ -478,41 +516,42 @@ class AppState: ObservableObject {
             activeToolCallMap[tcId] = activeTools.count - 1
 
             // Also add to current message's tool calls
-            if let idx = currentAssistantMessageIndex {
+            if let idx = currentAssistantIndexIfValid() {
                 messages[idx].toolCalls.append(tool)
             }
 
         case .toolExecutionUpdate(let tcId, _, let partial):
-            if let i = activeToolCallMap[tcId] {
+            if let i = activeToolIndex(for: tcId) {
                 activeTools[i].output = partial
             }
             // Update in message too
-            if let msgIdx = currentAssistantMessageIndex {
-                if let tIdx = messages[msgIdx].toolCalls.firstIndex(where: { $0.id == tcId }) {
-                    messages[msgIdx].toolCalls[tIdx].output = partial
-                }
+            if let msgIdx = currentAssistantIndexIfValid(),
+               let tIdx = messages[msgIdx].toolCalls.firstIndex(where: { $0.id == tcId }) {
+                messages[msgIdx].toolCalls[tIdx].output = partial
             }
 
-        case .toolExecutionEnd(let tcId, _, let result, let isErr):
-            if let i = activeToolCallMap[tcId] {
+        case .toolExecutionEnd(let tcId, let toolName, let result, let isErr):
+            let completedToolIndex = activeToolIndex(for: tcId)
+            if let i = completedToolIndex {
                 activeTools[i].output = result
                 activeTools[i].isError = isErr
                 activeTools[i].isRunning = false
             }
-            if let msgIdx = currentAssistantMessageIndex {
-                if let tIdx = messages[msgIdx].toolCalls.firstIndex(where: { $0.id == tcId }) {
-                    messages[msgIdx].toolCalls[tIdx].output = result
-                    messages[msgIdx].toolCalls[tIdx].isError = isErr
-                    messages[msgIdx].toolCalls[tIdx].isRunning = false
-                }
+            if let msgIdx = currentAssistantIndexIfValid(),
+               let tIdx = messages[msgIdx].toolCalls.firstIndex(where: { $0.id == tcId }) {
+                messages[msgIdx].toolCalls[tIdx].output = result
+                messages[msgIdx].toolCalls[tIdx].isError = isErr
+                messages[msgIdx].toolCalls[tIdx].isRunning = false
             }
-            let argsText = activeTools.first(where: { $0.id == tcId })?.args ?? ""
-            refreshResourcesAfterAgentInstallIfNeeded(toolName: activeTools.first(where: { $0.id == tcId })?.name ?? "", args: argsText, output: result, isError: isErr)
+            let completedTool = completedToolIndex.map { activeTools[$0] } ?? activeTools.first(where: { $0.id == tcId })
+            let argsText = completedTool?.args ?? ""
+            refreshResourcesAfterAgentInstallIfNeeded(toolName: completedTool?.name ?? toolName, args: argsText, output: result, isError: isErr)
 
             activeToolCallMap.removeValue(forKey: tcId)
             // Remove from active after short delay
             DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
                 self.activeTools.removeAll { $0.id == tcId && !$0.isRunning }
+                self.rebuildActiveToolCallMap()
             }
 
         case .queueUpdate(let s, let f):
@@ -1127,8 +1166,7 @@ try {
 
         do {
             try await rpc.newSession()
-            messages.removeAll()
-            activeTools.removeAll()
+            clearConversationTransientState(clearMessages: true)
             await loadInitialState()
         } catch {
             show(notification: AppNotification(message: "Failed to create new session: \(error.localizedDescription)", type: .error))
