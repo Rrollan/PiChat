@@ -5,8 +5,18 @@ APP_NAME="PiChat"
 BUILD_DIR="build"
 APP_DIR="$BUILD_DIR/$APP_NAME.app"
 MACOS_DIR="$APP_DIR/Contents/MacOS"
+RUNTIME_DIR="$BUILD_DIR/pi-runtime"
 
-echo "[1/5] Building release binary"
+BUNDLE_PI_RUNTIME=1
+if [[ "${SKIP_PI_RUNTIME:-0}" != "1" ]]; then
+  echo "[1/6] Packaging bundled pi runtime"
+  ./scripts/package-pi-runtime.sh
+else
+  BUNDLE_PI_RUNTIME=0
+  echo "[1/6] Skipping bundled pi runtime (SKIP_PI_RUNTIME=1)"
+fi
+
+echo "[2/6] Building release binary"
 swift build -c release
 
 BIN_PATH=".build/release/$APP_NAME"
@@ -20,7 +30,7 @@ if [[ ! -d "$RESOURCE_BUNDLE" ]]; then
   exit 1
 fi
 
-echo "[2/5] Preparing .app bundle"
+echo "[3/6] Preparing .app bundle"
 rm -rf "$APP_DIR"
 mkdir -p "$MACOS_DIR"
 mkdir -p "$APP_DIR/Contents/Resources"
@@ -28,14 +38,28 @@ mkdir -p "$APP_DIR/Contents/Resources"
 cp "$BIN_PATH" "$MACOS_DIR/$APP_NAME"
 cp "PiChat/Info.plist" "$APP_DIR/Contents/Info.plist"
 
-echo "[3/5] Copying bundled resources"
+echo "[4/6] Copying bundled resources"
 if [[ -d "PiChat/Resources" ]]; then
   cp -R "PiChat/Resources/." "$APP_DIR/Contents/Resources/"
 fi
 cp -R "$RESOURCE_BUNDLE" "$APP_DIR/Contents/Resources/"
+if [[ "$BUNDLE_PI_RUNTIME" == "1" ]]; then
+  if [[ ! -d "$RUNTIME_DIR" ]]; then
+    echo "Bundled pi runtime not found at $RUNTIME_DIR"
+    exit 1
+  fi
+  ditto "$RUNTIME_DIR" "$APP_DIR/Contents/Resources/pi-runtime"
 
-echo "[4/5] Codesigning (ad-hoc)"
+  if [[ -x "$APP_DIR/Contents/Resources/pi-runtime/bin/pi" ]]; then
+    "$APP_DIR/Contents/Resources/pi-runtime/bin/pi" --version >/dev/null
+  else
+    echo "Bundled pi wrapper missing from app resources"
+    exit 1
+  fi
+fi
+
+echo "[5/6] Codesigning (ad-hoc)"
 codesign --force --deep --sign - "$APP_DIR"
 
-echo "[5/5] Done"
+echo "[6/6] Done"
 echo "App bundle: $APP_DIR"

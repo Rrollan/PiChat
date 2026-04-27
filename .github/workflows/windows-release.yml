@@ -35,55 +35,47 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Prepare release metadata
+        id: meta
+        shell: pwsh
+        run: |
+          $version = node -p "require('./package.json').version"
+          $tagVersion = "${{ github.ref_name }}" -replace '^windows-', ''
+          if ($tagVersion -and $tagVersion -ne $version -and $tagVersion -ne "${{ github.ref_name }}") {
+            if ($tagVersion.TrimStart('v') -ne $version) {
+              throw "Tag ${{ github.ref_name }} does not match package version $version"
+            }
+          }
+          "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "notes=docs/RELEASE_NOTES_WINDOWS_v$version.md" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
       - name: Build native host
         run: npm run build:native-host
 
       - name: Typecheck
         run: npm run typecheck
 
-      - name: Build Windows artifacts
+      - name: Build Windows installer
         run: npm run dist
 
-      - name: Create unpacked zip
-        shell: pwsh
-        run: Compress-Archive -Path release/win-unpacked -DestinationPath release/PiChat-Windows-Unpacked-1.0.1-x64.zip -Force
-
-      - name: Checksums
+      - name: Verify installer artifact
         shell: pwsh
         run: |
-          $files = @(
-            'release/PiChat-Windows-Setup-1.0.1-x64.exe',
-            'release/PiChat-Windows-Portable-1.0.1-x64.exe',
-            'release/PiChat-Windows-Unpacked-1.0.1-x64.zip',
-            'release/PiChat-Windows-Setup-1.0.1-x64.exe.blockmap'
-          )
-          $lines = foreach ($file in $files) {
-            $hash = (Get-FileHash $file -Algorithm SHA256).Hash.ToLowerInvariant()
-            "$hash  $(Split-Path $file -Leaf)"
-          }
-          $lines | Set-Content release/SHA256SUMS.txt
+          $installer = "release/PiChat-Windows-Setup-${{ steps.meta.outputs.version }}-x64.exe"
+          if (-not (Test-Path $installer)) { throw "Installer not found: $installer" }
+          Write-Host "Windows release artifact: $installer"
 
-      - name: Upload workflow artifacts
+      - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
         with:
-          name: pichat-windows-release
-          path: |
-            windows version/release/PiChat-Windows-Setup-1.0.1-x64.exe
-            windows version/release/PiChat-Windows-Portable-1.0.1-x64.exe
-            windows version/release/PiChat-Windows-Unpacked-1.0.1-x64.zip
-            windows version/release/PiChat-Windows-Setup-1.0.1-x64.exe.blockmap
-            windows version/release/SHA256SUMS.txt
+          name: pichat-windows-installer
+          path: windows version/release/PiChat-Windows-Setup-${{ steps.meta.outputs.version }}-x64.exe
 
       - name: Publish GitHub release
         if: startsWith(github.ref, 'refs/tags/windows-v')
         uses: softprops/action-gh-release@v2
         with:
           name: PiChat Windows ${{ github.ref_name }}
-          body_path: docs/RELEASE_NOTES_WINDOWS_v1.0.1.md
+          body_path: ${{ steps.meta.outputs.notes }}
           make_latest: false
-          files: |
-            windows version/release/PiChat-Windows-Setup-1.0.1-x64.exe
-            windows version/release/PiChat-Windows-Portable-1.0.1-x64.exe
-            windows version/release/PiChat-Windows-Unpacked-1.0.1-x64.zip
-            windows version/release/PiChat-Windows-Setup-1.0.1-x64.exe.blockmap
-            windows version/release/SHA256SUMS.txt
+          files: windows version/release/PiChat-Windows-Setup-${{ steps.meta.outputs.version }}-x64.exe

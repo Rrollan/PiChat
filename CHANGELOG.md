@@ -2,6 +2,25 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Windows 1.0.2] - 2026-04-27
+
+### Changed
+- Simplified Windows distribution to a single native installer `.exe`
+- Removed portable/compact and unpacked ZIP artifacts from Windows GitHub releases
+- Updated Windows release workflow to derive artifact names and release notes from the package version
+
+## [1.0.10] - 2026-04-27
+
+### Added
+- Bundled the macOS pi runtime into `PiChat.app` with a packaged Node.js runtime
+- Added silent daily pi runtime auto-updates and a manual runtime update action in Settings
+- Added an in-app PiChat update card above the sidebar update button when a new release is available
+
+### Fixed
+- Made macOS builds deterministic when `SKIP_PI_RUNTIME=1` is used
+- Added bundled-runtime fallback if an updated runtime fails to start
+- Hardened runtime packaging with Node archive checksum verification and npmjs registry pinning
+
 ## [1.0.9] - 2026-04-27
 
 ### Fixed

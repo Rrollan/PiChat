@@ -1,6 +1,6 @@
 {
   "name": "pichat-windows",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Windows desktop client for PiChat / pi coding agent",
   "private": true,
   "main": "dist/main/main.js",
@@ -10,7 +10,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "build": "tsc -p tsconfig.main.json && vite build",
     "start": "electron .",
-    "dist": "npm run build && electron-builder --win nsis portable --x64",
+    "dist": "npm run build && electron-builder --win nsis --x64",
     "build:native-host": "powershell -ExecutionPolicy Bypass -File scripts/build-native-host.ps1",
     "verify:windows": "powershell -ExecutionPolicy Bypass -File scripts/verify-windows.ps1"
   },
@@ -57,8 +57,7 @@
     ],
     "win": {
       "target": [
-        "nsis",
-        "portable"
+        "nsis"
       ],
       "icon": "build/icon.ico"
     },
@@ -68,9 +67,6 @@
       "perMachine": false,
       "allowToChangeInstallationDirectory": true,
       "runAfterFinish": false
-    },
-    "portable": {
-      "artifactName": "PiChat-Windows-Portable-${version}-${arch}.${ext}"
     }
   }
 }

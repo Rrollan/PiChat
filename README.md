@@ -30,11 +30,7 @@ PiChat is a clean, production-ready SwiftUI desktop app that runs `pi --mode rpc
 
 ### Windows
 
-👉 **[Download PiChat for Windows (Installer)](https://github.com/Rrollan/PiChat/releases/download/windows-v1.0.0/PiChat-Windows-Setup-1.0.0-x64.exe)**
-
-Portable build:
-
-👉 **[Download PiChat for Windows (Portable)](https://github.com/Rrollan/PiChat/releases/download/windows-v1.0.0/PiChat-Windows-Portable-1.0.0-x64.exe)**
+👉 **[Download PiChat for Windows (Installer EXE)](https://github.com/Rrollan/PiChat/releases/download/windows-v1.0.2/PiChat-Windows-Setup-1.0.2-x64.exe)**
 
 Full Windows guide: **[docs/WINDOWS.md](docs/WINDOWS.md)**
 
@@ -48,24 +44,16 @@ Full Windows guide: **[docs/WINDOWS.md](docs/WINDOWS.md)**
 4. Open **Applications → PiChat**
 5. If macOS shows a security warning: right-click the app → **Open**
 
+The macOS app bundles the pi coding agent and Node.js runtime. A global `pi` install is not required for normal use.
+
 ---
 
 ## 🧩 Install (Windows)
 
-1. Install **Node.js 20+**.
-2. Install the pi coding agent:
-   ```powershell
-   npm install -g @mariozechner/pi-coding-agent
-   ```
-3. Download and run **`PiChat-Windows-Setup-1.0.0-x64.exe`**.
-4. Open **PiChat** from Start Menu.
-5. If PiChat cannot find `pi`, open **Settings → Pi Runtime** and set:
-   ```text
-   C:\Users\YOUR_NAME\AppData\Roaming\npm\pi.cmd
-   ```
-6. Click **Reconnect** and start chatting.
-
-Prefer no installer? Use **`PiChat-Windows-Portable-1.0.0-x64.exe`**.
+1. Download and run **`PiChat-Windows-Setup-1.0.2-x64.exe`**.
+2. Open **PiChat** from Start Menu or Desktop shortcut.
+3. The Windows app includes a bundled pi runtime. If you intentionally want to use an external/global `pi`, open **Settings → Pi Runtime** and set its executable path.
+4. Click **Reconnect** and start chatting.
 
 See the full step-by-step guide: **[docs/WINDOWS.md](docs/WINDOWS.md)**.
 
@@ -73,19 +61,17 @@ See the full step-by-step guide: **[docs/WINDOWS.md](docs/WINDOWS.md)**.
 
 ## 🚀 First launch
 
-1. Install pi coding agent (source: https://github.com/badlogic/pi-mono):
-   ```bash
-   npm install -g @mariozechner/pi-coding-agent
-   ```
-2. Open PiChat
-3. If needed, set `pi` path in Settings (`pi` works by default; on Windows use `pi.cmd` if needed)
-4. Start chatting
+1. Open PiChat.
+2. Keep **Settings → Pi Runtime → Pi executable** set to `pi` to use the bundled/default runtime.
+3. Optional: set a full path if you want PiChat to use an external `pi` executable instead.
+4. Start chatting.
 
 ---
 
 ## ✨ Features
 
 - Native SwiftUI UX for macOS
+- Bundled pi runtime with manual and daily auto-updates
 - Real-time chat with tool streaming
 - Model and thinking controls
 - Session stats (tokens / context / cost)
@@ -132,22 +118,14 @@ Run sanity scan before each release:
 ### macOS
 
 1. macOS 14+
-2. Xcode Command Line Tools
-3. Installed pi coding agent (source: https://github.com/badlogic/pi-mono):
-
-```bash
-npm install -g @mariozechner/pi-coding-agent
-```
+2. Xcode Command Line Tools are needed only when building from source
+3. The distributed app includes pi and Node.js; no global `npm install -g` is required
 
 ### Windows
 
 1. Windows 10/11 x64
-2. Node.js 20+
-3. Installed pi coding agent:
-
-```powershell
-npm install -g @mariozechner/pi-coding-agent
-```
+2. The installer includes pi and Node.js
+3. Node.js 20+ is only needed if you choose to use an external/global `pi` runtime
 
 ---
 
@@ -157,9 +135,11 @@ npm install -g @mariozechner/pi-coding-agent
 
 ```bash
 swift build -c release
-./scripts/build-app.sh
+./scripts/build-app.sh      # packages the bundled pi runtime by default
 open build/PiChat.app
 ```
+
+For a local developer build without embedding pi, use `SKIP_PI_RUNTIME=1 ./scripts/build-app.sh`.
 
 ### Windows
 
@@ -170,7 +150,7 @@ npm run verify:windows
 npm run dist
 ```
 
-Windows artifacts are written to `windows version/release/`.
+The Windows installer is written to `windows version/release/PiChat-Windows-Setup-<version>-x64.exe`.
 
 ---
 

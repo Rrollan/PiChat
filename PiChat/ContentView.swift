@@ -58,6 +58,11 @@ struct ContentView: View {
         }
         .onAppear {
             state.evaluateInstallLocationSuggestion()
+            Task {
+                async let piRuntimeUpdate: Void = state.autoUpdatePiRuntimeIfNeeded()
+                async let appUpdateCheck: Void = state.checkForPiChatUpdateIfNeeded()
+                _ = await (piRuntimeUpdate, appUpdateCheck)
+            }
         }
     }
 }

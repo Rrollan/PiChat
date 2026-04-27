@@ -4,61 +4,27 @@ PiChat for Windows is a native-feeling desktop app built with Electron. It runs 
 
 ## Download
 
-Use the Windows installer from the Windows release:
+Use the single Windows installer from the Windows release:
 
-- **Installer:** `PiChat-Windows-Setup-1.0.0-x64.exe`
-- **Portable:** `PiChat-Windows-Portable-1.0.0-x64.exe`
+- **Installer EXE:** `PiChat-Windows-Setup-1.0.2-x64.exe`
 
-Direct links after release publication:
+Direct link after release publication:
 
-- https://github.com/Rrollan/PiChat/releases/download/windows-v1.0.0/PiChat-Windows-Setup-1.0.0-x64.exe
-- https://github.com/Rrollan/PiChat/releases/download/windows-v1.0.0/PiChat-Windows-Portable-1.0.0-x64.exe
+- https://github.com/Rrollan/PiChat/releases/download/windows-v1.0.2/PiChat-Windows-Setup-1.0.2-x64.exe
 
 ## Requirements
 
 1. Windows 10/11 x64.
-2. Node.js 20 or newer.
-3. Pi coding agent installed globally:
-
-```powershell
-npm install -g @mariozechner/pi-coding-agent
-```
-
-Check that `pi` is available:
-
-```powershell
-pi --version
-```
+2. The installer includes the pi coding agent and Node.js runtime.
+3. Node.js 20+ is only needed if you intentionally configure PiChat to use an external/global `pi`.
 
 ## Simple installation
 
-1. Download `PiChat-Windows-Setup-1.0.0-x64.exe`.
+1. Download `PiChat-Windows-Setup-1.0.2-x64.exe`.
 2. Open the installer.
 3. Follow the installation steps.
 4. Launch **PiChat** from Start Menu or Desktop.
-5. If PiChat cannot find `pi`, open **Settings → Pi Runtime** and set the executable path.
-
-Usually this works:
-
-```text
-pi
-```
-
-If your global npm path is unusual, use the full path to `pi.cmd`, for example:
-
-```text
-C:\Users\YOUR_NAME\AppData\Roaming\npm\pi.cmd
-```
-
-## Portable mode
-
-If you do not want to install PiChat:
-
-1. Download `PiChat-Windows-Portable-1.0.0-x64.exe`.
-2. Place it anywhere, for example `Downloads` or `Desktop`.
-3. Run it directly.
-
-Portable mode still stores app settings in the normal Windows user data directory.
+5. Keep **Settings → Pi Runtime** on the default bundled runtime, or set a custom executable path if you want to use an external/global `pi`.
 
 ## First launch setup
 
@@ -94,13 +60,15 @@ Native host files are installed to:
 
 ### PiChat says `pi is not running` or cannot start pi
 
-Run this in PowerShell:
+Open **Settings → Pi Runtime** and switch back to the bundled/default runtime, then click **Reconnect**.
+
+If you configured an external `pi`, verify it manually in PowerShell:
 
 ```powershell
 pi --version
 ```
 
-If PowerShell cannot find `pi`, reinstall it:
+If PowerShell cannot find `pi`, install or repair your external runtime:
 
 ```powershell
 npm install -g @mariozechner/pi-coding-agent
@@ -140,8 +108,8 @@ npm run verify:windows
 npm run dist
 ```
 
-Artifacts are written to:
+The installer is written to:
 
 ```text
-windows version\release
+windows version\release\PiChat-Windows-Setup-<version>-x64.exe
 ```

@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 // MARK: - Sidebar View
 
@@ -569,6 +570,136 @@ struct MCPServerRow: View {
     }
 }
 
+struct AppUpdateAvailableBubble: View {
+    @EnvironmentObject var state: AppState
+    let update: AppUpdateInfo
+    @State private var shimmer = false
+
+    var body: some View {
+        VStack(spacing: 0) {
+            VStack(alignment: .leading, spacing: DS.Spacing.md) {
+                HStack(alignment: .top, spacing: DS.Spacing.sm) {
+                    ZStack {
+                        Circle()
+                            .fill(DS.Colors.green.opacity(0.14))
+                            .frame(width: 34, height: 34)
+                        Image(systemName: "sparkles")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(DS.Colors.green)
+                    }
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("PiChat update")
+                            .font(DS.display(13, weight: .semibold))
+                            .foregroundStyle(DS.Colors.textPrimary)
+                        Text("Version \(update.version) is ready")
+                            .font(DS.body(11))
+                            .foregroundStyle(DS.Colors.textSecondary)
+                    }
+
+                    Spacer(minLength: DS.Spacing.sm)
+
+                    Button {
+                        state.dismissAvailableAppUpdate()
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundStyle(DS.Colors.textTertiary)
+                            .frame(width: 22, height: 22)
+                    }
+                    .buttonStyle(.plain)
+                }
+
+                ZStack(alignment: .leading) {
+                    Capsule()
+                        .fill(DS.Colors.border.opacity(0.35))
+                        .frame(height: 1)
+                    Capsule()
+                        .fill(LinearGradient(colors: [DS.Colors.green.opacity(0.15), DS.Colors.green, DS.Colors.yellow.opacity(0.8)], startPoint: .leading, endPoint: .trailing))
+                        .frame(width: shimmer ? 176 : 48, height: 1)
+                        .opacity(shimmer ? 0.9 : 0.35)
+                }
+
+                HStack(spacing: DS.Spacing.sm) {
+                    Button {
+                        state.openAvailableAppUpdate()
+                    } label: {
+                        Label("Download", systemImage: "arrow.down.circle.fill")
+                            .font(DS.body(11, weight: .semibold))
+                            .foregroundStyle(Color.white)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 7)
+                            .background(DS.Colors.green)
+                            .clipShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+
+                    Button {
+                        if let url = URL(string: update.releaseURL) {
+                            NSWorkspace.shared.open(url)
+                        }
+                    } label: {
+                        Text("Notes")
+                            .font(DS.body(11, weight: .medium))
+                            .foregroundStyle(DS.Colors.textSecondary)
+                            .padding(.horizontal, 9)
+                            .padding(.vertical, 7)
+                            .background(DS.Colors.surface.opacity(0.72))
+                            .clipShape(Capsule())
+                            .overlay(Capsule().stroke(DS.Colors.border, lineWidth: 0.5))
+                    }
+                    .buttonStyle(.plain)
+
+                    Spacer()
+                }
+            }
+            .padding(DS.Spacing.md)
+            .frame(width: 238)
+            .background(
+                ZStack {
+                    DS.Colors.surfaceElevated
+                    LinearGradient(
+                        colors: [DS.Colors.green.opacity(0.12), .clear, DS.Colors.yellow.opacity(0.08)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                }
+            )
+            .clipShape(RoundedRectangle(cornerRadius: DS.Radius.lg))
+            .overlay(
+                RoundedRectangle(cornerRadius: DS.Radius.lg)
+                    .stroke(LinearGradient(colors: [DS.Colors.green.opacity(0.45), DS.Colors.border.opacity(0.75)], startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 1)
+            )
+            .shadow(color: DS.Colors.green.opacity(0.18), radius: 18, y: 8)
+
+            Triangle()
+                .fill(DS.Colors.surfaceElevated)
+                .frame(width: 18, height: 10)
+                .overlay(
+                    Triangle()
+                        .stroke(DS.Colors.border.opacity(0.65), lineWidth: 0.7)
+                )
+                .offset(x: -82, y: -1)
+        }
+        .onAppear {
+            withAnimation(.easeInOut(duration: 1.6).repeatForever(autoreverses: true)) {
+                shimmer = true
+            }
+        }
+    }
+}
+
+struct Triangle: Shape {
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        path.move(to: CGPoint(x: rect.midX, y: rect.maxY))
+        path.addLine(to: CGPoint(x: rect.minX, y: rect.minY))
+        path.addLine(to: CGPoint(x: rect.maxX, y: rect.minY))
+        path.closeSubpath()
+        return path
+    }
+}
+
 // MARK: - Sidebar Actions
 
 struct SidebarActionsView: View {
@@ -594,11 +725,25 @@ struct SidebarActionsView: View {
 
             Spacer(minLength: 0)
 
-            IconButton(icon: state.isCheckingForUpdates ? "hourglass" : "arrow.down.app", color: DS.Colors.textSecondary, hoverColor: DS.Colors.green) {
-                Task { await state.updateFromGitHub() }
+            ZStack(alignment: .top) {
+                IconButton(icon: state.isCheckingForUpdates ? "hourglass" : (state.availableAppUpdate == nil ? "arrow.down.app" : "arrow.down.app.fill"), color: DS.Colors.textSecondary, hoverColor: DS.Colors.green) {
+                    Task { await state.updateFromGitHub() }
+                }
+                .disabled(state.isCheckingForUpdates)
+                .help(state.isCheckingForUpdates ? "Checking updates..." : "Update PiChat")
+
+                if let update = state.availableAppUpdate {
+                    AppUpdateAvailableBubble(update: update)
+                        .environmentObject(state)
+                        .offset(x: 88, y: -136)
+                        .transition(.asymmetric(
+                            insertion: .scale(scale: 0.92, anchor: .bottom).combined(with: .opacity),
+                            removal: .scale(scale: 0.96, anchor: .bottom).combined(with: .opacity)
+                        ))
+                        .zIndex(20)
+                }
             }
-            .disabled(state.isCheckingForUpdates)
-            .help(state.isCheckingForUpdates ? "Checking updates..." : "Update PiChat")
+            .animation(.spring(response: 0.34, dampingFraction: 0.82), value: state.availableAppUpdate?.id)
 
             Spacer(minLength: 0)
 

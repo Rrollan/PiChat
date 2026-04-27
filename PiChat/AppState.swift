@@ -134,6 +134,9 @@ class AppState: ObservableObject {
     @Published var piPath: String
     @Published var startupDirectory: String
     @Published var piConfigDirectory: String
+    @Published var piRuntimeStatusText: String = "Runtime not resolved"
+    @Published var piRuntimeAutoUpdatesEnabled: Bool
+    @Published var isCheckingPiRuntimeUpdates = false
     @Published var settingsJSONText: String = "{}"
     @Published var modelsJSONText: String = "{}"
     @Published var authJSONText: String = "{}"
@@ -220,6 +223,7 @@ class AppState: ObservableObject {
 
     // MARK: App Update
     @Published var isCheckingForUpdates = false
+    @Published var availableAppUpdate: AppUpdateInfo?
 
     // MARK: Browser Assistant
     @Published var browserExtensionId: String = ""
@@ -248,12 +252,14 @@ class AppState: ObservableObject {
     private var busyActionDepth = 0
     private var oauthHelperInputHandle: FileHandle?
     private var oauthHelperProcess: Process?
+    private let piRuntimeManager = PiRuntimeManager()
 
     init() {
         let defaults = UserDefaults.standard
         self.piPath = defaults.string(forKey: "pi.runtime.path") ?? "pi"
         self.startupDirectory = defaults.string(forKey: "pi.runtime.startupDirectory") ?? NSHomeDirectory()
         self.piConfigDirectory = defaults.string(forKey: "pi.runtime.configDirectory") ?? PiConfigManager.defaultConfigDir()
+        self.piRuntimeAutoUpdatesEnabled = defaults.object(forKey: "pi.runtime.autoUpdatesEnabled") as? Bool ?? true
         self.cliNoSession = defaults.object(forKey: "pi.cli.noSession") as? Bool ?? true
         self.cliProvider = defaults.string(forKey: "pi.cli.provider") ?? ""
         self.cliModel = defaults.string(forKey: "pi.cli.model") ?? ""
@@ -281,6 +287,7 @@ class AppState: ObservableObject {
         refreshBrowserBridgeStatus()
         setupEventHandling()
         loadConfigFiles()
+        refreshPiRuntimeStatus()
     }
 
     // MARK: - Setup
@@ -306,7 +313,7 @@ class AppState: ObservableObject {
         self.startupDirectory = resolvedWorkingDirectory
         persistRuntimeSettings()
 
-        rpc.piPath = resolvedPiPath
+        let selectedRuntime = configurePiRuntime(for: resolvedPiPath)
         rpc.workingDirectory = resolvedWorkingDirectory
         rpc.launchArguments = buildRpcLaunchArguments()
         rpc.enableDebugLogging = cliVerbose
@@ -318,9 +325,51 @@ class AppState: ObservableObject {
             try? await Task.sleep(nanoseconds: 800_000_000)
             await loadInitialState()
         } catch {
-            connectionError = error.localizedDescription
+            if selectedRuntime?.source == .userUpdated, let bundledRuntime = piRuntimeManager.bundledRuntime() {
+                applyPiRuntime(bundledRuntime)
+                do {
+                    try await rpc.start()
+                    isConnected = true
+                    show(notification: AppNotification(message: "Updated pi runtime failed; using bundled pi \(bundledRuntime.version).", type: .error))
+                    try? await Task.sleep(nanoseconds: 800_000_000)
+                    await loadInitialState()
+                } catch {
+                    connectionError = "Updated pi runtime failed, and bundled fallback also failed: \(error.localizedDescription)"
+                }
+            } else {
+                connectionError = error.localizedDescription
+            }
         }
         isStarting = false
+    }
+
+    @discardableResult
+    private func configurePiRuntime(for requestedPath: String) -> PiRuntimeInstallation? {
+        let trimmed = requestedPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        let wantsDefaultPi = trimmed.isEmpty || trimmed == "pi"
+
+        rpc.piCliScriptPath = nil
+        rpc.piNodePath = nil
+        rpc.piPath = wantsDefaultPi ? "pi" : requestedPath
+
+        guard wantsDefaultPi, let runtime = piRuntimeManager.activeRuntime() else {
+            piRuntimeStatusText = wantsDefaultPi ? "Using pi from PATH" : "Using external pi: \(requestedPath)"
+            return nil
+        }
+
+        applyPiRuntime(runtime)
+        return runtime
+    }
+
+    private func applyPiRuntime(_ runtime: PiRuntimeInstallation) {
+        rpc.piPath = "pi"
+        rpc.piNodePath = runtime.nodePath.path
+        rpc.piCliScriptPath = runtime.cliPath.path
+        piRuntimeStatusText = "\(runtime.displayName) · \(runtime.source == .bundled ? "app bundle" : "Application Support")"
+    }
+
+    func refreshPiRuntimeStatus() {
+        configurePiRuntime(for: piPath)
     }
 
     func disconnect() {
@@ -335,7 +384,7 @@ class AppState: ObservableObject {
         disconnect()
         startupDirectory = newDirectory
         persistRuntimeSettings()
-        await connect(piPath: rpc.piPath, workingDirectory: newDirectory)
+        await connect(piPath: piPath, workingDirectory: newDirectory)
     }
 
     private func loadInitialState() async {
@@ -661,8 +710,12 @@ class AppState: ObservableObject {
 
     private func runOAuthLogin(providerId: String) async throws {
         let script = """
-import { AuthStorage } from 'file:///opt/homebrew/lib/node_modules/@mariozechner/pi-coding-agent/dist/core/auth-storage.js';
 import readline from 'node:readline';
+import { pathToFileURL } from 'node:url';
+
+const authStorageModule = process.env.PI_AUTH_STORAGE_MODULE;
+if (!authStorageModule) throw new Error('Pi AuthStorage module was not found. Use the bundled pi runtime or install pi globally.');
+const { AuthStorage } = await import(pathToFileURL(authStorageModule).href);
 
 const providerId = process.argv[1];
 const authPath = process.argv[2];
@@ -696,11 +749,17 @@ try {
 
         let authPath = URL(fileURLWithPath: piConfigDirectory).appendingPathComponent("auth.json").path
 
-        let nodeExecutable = resolveNodeExecutable()
+        let runtime = piRuntimeManager.activeRuntime()
+        let nodeExecutable = runtime?.nodePath.path ?? resolveNodeExecutable()
+        let authStoragePath = runtime?.authStoragePath.path ?? resolveGlobalAuthStorageModule()
 
         let process = Process()
         process.executableURL = URL(fileURLWithPath: nodeExecutable)
         process.arguments = ["--input-type=module", "-e", script, providerId, authPath]
+        var env = ProcessInfo.processInfo.environment
+        if let authStoragePath { env["PI_AUTH_STORAGE_MODULE"] = authStoragePath }
+        if let runtime { env["PATH"] = "\(runtime.nodePath.deletingLastPathComponent().path):\(env["PATH"] ?? "")" }
+        process.environment = env
 
         let stdin = Pipe()
         let stdout = Pipe()
@@ -778,6 +837,14 @@ try {
         }
 
         return "node"
+    }
+
+    private func resolveGlobalAuthStorageModule() -> String? {
+        let candidates = [
+            "/opt/homebrew/lib/node_modules/@mariozechner/pi-coding-agent/dist/core/auth-storage.js",
+            "/usr/local/lib/node_modules/@mariozechner/pi-coding-agent/dist/core/auth-storage.js"
+        ]
+        return candidates.first { FileManager.default.fileExists(atPath: $0) }
     }
 
     private func handleOAuthHelperEventLine(_ line: String) {
@@ -1069,8 +1136,68 @@ try {
         await connect(piPath: piPath, workingDirectory: startupDirectory)
     }
 
-    func updateFromGitHub() async {
-        guard !isCheckingForUpdates else { return }
+    func autoUpdatePiRuntimeIfNeeded() async {
+        let trimmedPiPath = piPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        let usesBundledRuntime = trimmedPiPath.isEmpty || trimmedPiPath == "pi"
+        guard piRuntimeAutoUpdatesEnabled,
+              usesBundledRuntime,
+              piRuntimeManager.bundledRuntime() != nil,
+              piRuntimeManager.shouldRunAutomaticCheck() else { return }
+
+        let completed = await updatePiRuntime(
+            showUpToDateNotification: false,
+            showInstalledNotification: false,
+            reconnectIfInstalled: false
+        )
+        if completed { piRuntimeManager.markAutomaticCheck() }
+    }
+
+    @discardableResult
+    func updatePiRuntime(
+        showUpToDateNotification: Bool = true,
+        showInstalledNotification: Bool = true,
+        reconnectIfInstalled: Bool = true
+    ) async -> Bool {
+        guard !isCheckingPiRuntimeUpdates else { return false }
+        isCheckingPiRuntimeUpdates = true
+        defer { isCheckingPiRuntimeUpdates = false }
+
+        do {
+            let result = try await piRuntimeManager.installLatestIfNeeded()
+            refreshPiRuntimeStatus()
+
+            if result.installed {
+                if reconnectIfInstalled, isConnected && !isStreaming {
+                    if showInstalledNotification {
+                        show(notification: AppNotification(message: "pi runtime \(result.version) installed. Reconnecting…", type: .success))
+                    }
+                    await reconnect()
+                } else if showInstalledNotification {
+                    show(notification: AppNotification(message: "pi runtime \(result.version) installed. It will be used on next reconnect.", type: .success))
+                }
+            } else if showUpToDateNotification {
+                show(notification: AppNotification(message: result.message, type: .info))
+            }
+            return true
+        } catch {
+            if showUpToDateNotification {
+                show(notification: AppNotification(message: "Failed to update pi runtime: \(error.localizedDescription)", type: .error))
+            }
+            return false
+        }
+    }
+
+    func checkForPiChatUpdateIfNeeded() async {
+        let defaults = UserDefaults.standard
+        let last = defaults.object(forKey: "pichat.update.lastAutomaticCheck") as? Date
+        if let last, Date().timeIntervalSince(last) < 6 * 60 * 60 { return }
+        defaults.set(Date(), forKey: "pichat.update.lastAutomaticCheck")
+        await checkForPiChatUpdate(showNoUpdateNotification: false, respectDismissedVersion: true)
+    }
+
+    @discardableResult
+    func checkForPiChatUpdate(showNoUpdateNotification: Bool = true, respectDismissedVersion: Bool = false) async -> Bool {
+        guard !isCheckingForUpdates else { return false }
         isCheckingForUpdates = true
         defer { isCheckingForUpdates = false }
 
@@ -1080,22 +1207,55 @@ try {
             let latestVersion = normalizedVersionString(release.tagName)
 
             guard isVersion(latestVersion, greaterThan: currentVersion) else {
-                show(notification: AppNotification(message: "You already have the latest version (\(currentVersion))", type: .info))
-                return
+                availableAppUpdate = nil
+                if showNoUpdateNotification {
+                    show(notification: AppNotification(message: "You already have the latest version (\(currentVersion))", type: .info))
+                }
+                return false
+            }
+
+            if respectDismissedVersion,
+               UserDefaults.standard.string(forKey: "pichat.update.dismissedTag") == release.tagName {
+                return true
             }
 
             let download = release.assets?.first(where: { $0.name.lowercased().hasSuffix(".dmg") })?.browserDownloadURL
-            let fallback = "https://github.com/Rrollan/PiChat/releases/latest/download/PiChat-macOS.dmg"
-            guard let url = URL(string: download ?? fallback) else {
+                ?? "https://github.com/Rrollan/PiChat/releases/latest/download/PiChat-macOS.dmg"
+            guard URL(string: download) != nil, URL(string: release.htmlURL) != nil else {
                 show(notification: AppNotification(message: "Failed to build update link", type: .error))
-                return
+                return false
             }
 
-            NSWorkspace.shared.open(url)
-            show(notification: AppNotification(message: "Version \(latestVersion) found. Opening download…", type: .success))
+            availableAppUpdate = AppUpdateInfo(
+                version: latestVersion,
+                tagName: release.tagName,
+                downloadURL: download,
+                releaseURL: release.htmlURL
+            )
+            return true
         } catch {
-            show(notification: AppNotification(message: "Failed to check updates: \(error.localizedDescription)", type: .error))
+            if showNoUpdateNotification {
+                show(notification: AppNotification(message: "Failed to check updates: \(error.localizedDescription)", type: .error))
+            }
+            return false
         }
+    }
+
+    func updateFromGitHub() async {
+        _ = await checkForPiChatUpdate(showNoUpdateNotification: true, respectDismissedVersion: false)
+    }
+
+    func openAvailableAppUpdate() {
+        guard let update = availableAppUpdate, let url = URL(string: update.downloadURL) else { return }
+        NSWorkspace.shared.open(url)
+        show(notification: AppNotification(message: "Downloading PiChat \(update.version)…", type: .success))
+    }
+
+    func dismissAvailableAppUpdate() {
+        if let update = availableAppUpdate {
+            UserDefaults.standard.set(update.tagName, forKey: "pichat.update.dismissedTag")
+        }
+        availableAppUpdate = nil
     }
 
     private var appVersion: String {
@@ -1324,6 +1484,7 @@ try {
         defaults.set(piPath, forKey: "pi.runtime.path")
         defaults.set(startupDirectory, forKey: "pi.runtime.startupDirectory")
         defaults.set(piConfigDirectory, forKey: "pi.runtime.configDirectory")
+        defaults.set(piRuntimeAutoUpdatesEnabled, forKey: "pi.runtime.autoUpdatesEnabled")
 
         defaults.set(cliNoSession, forKey: "pi.cli.noSession")
         defaults.set(cliProvider, forKey: "pi.cli.provider")
@@ -1759,6 +1920,14 @@ struct AppNotification: Identifiable {
     let type: NotificationType
 
     enum NotificationType { case info, warning, error, success }
+}
+
+struct AppUpdateInfo: Identifiable, Equatable {
+    var id: String { tagName }
+    let version: String
+    let tagName: String
+    let downloadURL: String
+    let releaseURL: String
 }
 
 struct ExtensionUIRequest: Identifiable {

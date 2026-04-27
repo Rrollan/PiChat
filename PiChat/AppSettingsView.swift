@@ -184,14 +184,58 @@ struct AppSettingsView: View {
     }
 
     private var runtimeCard: some View {
-        settingsCard(title: "Pi Runtime", subtitle: "Binary path and working directories") {
-            TextField("Pi executable (pi or /full/path/to/pi)", text: $state.piPath).textFieldStyle(.roundedBorder)
+        settingsCard(title: "Pi Runtime", subtitle: "Bundled runtime, updates, and working directories") {
+            TextField("Pi executable (use 'pi' for bundled/default, or /full/path/to/pi)", text: $state.piPath)
+                .textFieldStyle(.roundedBorder)
             TextField("Startup project directory", text: $state.startupDirectory).textFieldStyle(.roundedBorder)
             TextField("Pi config directory (~/.pi/agent)", text: $state.piConfigDirectory).textFieldStyle(.roundedBorder)
 
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: DS.Spacing.sm) {
+                    Image(systemName: "shippingbox")
+                        .foregroundStyle(DS.Colors.accent)
+                    Text(state.piRuntimeStatusText)
+                        .font(DS.body(11, weight: .medium))
+                        .foregroundStyle(DS.Colors.textSecondary)
+                    Spacer()
+                }
+                Text("When the path is 'pi', PiChat prefers its bundled/updated runtime and falls back to PATH only if no bundled runtime exists.")
+                    .font(DS.body(10))
+                    .foregroundStyle(DS.Colors.textTertiary)
+            }
+            .padding(DS.Spacing.sm)
+            .background(DS.Colors.surfaceElevated)
+            .clipShape(RoundedRectangle(cornerRadius: DS.Radius.sm))
+            .overlay(RoundedRectangle(cornerRadius: DS.Radius.sm).stroke(DS.Colors.border, lineWidth: 1))
+
+            Toggle("Silently auto-update bundled pi runtime daily", isOn: Binding<Bool>(
+                get: { state.piRuntimeAutoUpdatesEnabled },
+                set: { newValue in
+                    state.piRuntimeAutoUpdatesEnabled = newValue
+                    state.persistRuntimeSettings()
+                }
+            ))
+
             HStack(spacing: DS.Spacing.sm) {
-                Button("Save") { state.persistRuntimeSettings() }
-                    .buttonStyle(.bordered)
+                Button("Save") {
+                    state.persistRuntimeSettings()
+                    state.refreshPiRuntimeStatus()
+                }
+                .buttonStyle(.bordered)
+
+                Button("Use Bundled") {
+                    state.piPath = "pi"
+                    state.persistRuntimeSettings()
+                    state.refreshPiRuntimeStatus()
+                }
+                .buttonStyle(.bordered)
+
+                Button(state.isCheckingPiRuntimeUpdates ? "Updating pi…" : "Update pi Runtime") {
+                    Task { await state.updatePiRuntime() }
+                }
+                .buttonStyle(.bordered)
+                .disabled(state.isCheckingPiRuntimeUpdates)
+
                 Button("Reconnect") { Task { await state.reconnect() } }
                     .buttonStyle(.borderedProminent)
             }

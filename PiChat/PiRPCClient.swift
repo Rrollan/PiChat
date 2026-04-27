@@ -211,6 +211,8 @@ class PiRPCClient: ObservableObject {
     private var readTask: Task<Void, Never>?
 
     var piPath: String = "pi"
+    var piNodePath: String?
+    var piCliScriptPath: String?
     var workingDirectory: String = NSHomeDirectory()
     var launchArguments: [String] = ["--no-session"]
     var enableDebugLogging: Bool = false
@@ -221,17 +223,36 @@ class PiRPCClient: ObservableObject {
         guard !isRunning else { return }
 
         let proc = Process()
-        let usesEnvLauncher = !piPath.contains("/")
-        if usesEnvLauncher {
-            proc.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-            proc.arguments = [piPath, "--mode", "rpc"] + launchArguments
-        } else {
-            let executablePath = NSString(string: piPath).expandingTildeInPath
-            guard FileManager.default.isExecutableFile(atPath: executablePath) else {
-                throw RPCError.commandFailed("pi executable not found or not executable: \(piPath)")
+        if let cliScriptPath = piCliScriptPath {
+            let scriptPath = NSString(string: cliScriptPath).expandingTildeInPath
+            guard FileManager.default.fileExists(atPath: scriptPath) else {
+                throw RPCError.commandFailed("bundled pi CLI not found: \(cliScriptPath)")
             }
-            proc.executableURL = URL(fileURLWithPath: executablePath)
-            proc.arguments = ["--mode", "rpc"] + launchArguments
+
+            let nodePath = NSString(string: piNodePath ?? "node").expandingTildeInPath
+            if nodePath.contains("/") {
+                guard FileManager.default.isExecutableFile(atPath: nodePath) else {
+                    throw RPCError.commandFailed("bundled Node executable not found or not executable: \(nodePath)")
+                }
+                proc.executableURL = URL(fileURLWithPath: nodePath)
+                proc.arguments = [scriptPath, "--mode", "rpc"] + launchArguments
+            } else {
+                proc.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+                proc.arguments = [nodePath, scriptPath, "--mode", "rpc"] + launchArguments
+            }
+        } else {
+            let usesEnvLauncher = !piPath.contains("/")
+            if usesEnvLauncher {
+                proc.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+                proc.arguments = [piPath, "--mode", "rpc"] + launchArguments
+            } else {
+                let executablePath = NSString(string: piPath).expandingTildeInPath
+                guard FileManager.default.isExecutableFile(atPath: executablePath) else {
+                    throw RPCError.commandFailed("pi executable not found or not executable: \(piPath)")
+                }
+                proc.executableURL = URL(fileURLWithPath: executablePath)
+                proc.arguments = ["--mode", "rpc"] + launchArguments
+            }
         }
         proc.currentDirectoryURL = URL(fileURLWithPath: workingDirectory)
 
@@ -253,7 +274,12 @@ class PiRPCClient: ObservableObject {
             guard !part.isEmpty, !mergedParts.contains(part) else { continue }
             mergedParts.append(part)
         }
+        if let nodePath = piNodePath?.trimmingCharacters(in: .whitespacesAndNewlines), nodePath.contains("/") {
+            let nodeBin = URL(fileURLWithPath: NSString(string: nodePath).expandingTildeInPath).deletingLastPathComponent().path
+            if !mergedParts.contains(nodeBin) { mergedParts.insert(nodeBin, at: 0) }
+        }
         env["PATH"] = mergedParts.joined(separator: ":")
+        if piCliScriptPath != nil { env["PICHAT_BUNDLED_PI"] = "1" }
         proc.environment = env
 
         let stdin = Pipe()
