@@ -307,7 +307,7 @@ class PiRPCClient: ObservableObject {
         stderr.fileHandleForReading.readabilityHandler = { [weak self] handle in
             let data = handle.availableData
             if data.count > 0, let str = String(data: data, encoding: .utf8) {
-                Task { @MainActor in
+                Task { @MainActor [weak self] in
                     guard let self else { return }
                     for rawLine in str.split(whereSeparator: \.isNewline) {
                         let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
