@@ -207,6 +207,30 @@ export function resourcePath(...parts: string[]): string {
   return path.join(app.getAppPath(), ...parts);
 }
 
+function bundledPiFile(relativeDistPath: string): string | null {
+  const relative = path.join('node_modules', '@mariozechner', 'pi-coding-agent', 'dist', relativeDistPath);
+  const candidates = app.isPackaged
+    ? [
+        path.join(process.resourcesPath, 'app.asar.unpacked', relative),
+        path.join(process.resourcesPath, 'app.asar', relative),
+        path.join(app.getAppPath(), relative)
+      ]
+    : [path.join(app.getAppPath(), relative)];
+
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate)) return candidate;
+  }
+  return null;
+}
+
+export function bundledPiCliPath(): string | null {
+  return bundledPiFile('cli.js');
+}
+
+export function bundledPiAuthStoragePath(): string | null {
+  return bundledPiFile(path.join('core', 'auth-storage.js'));
+}
+
 export function browserToolsExtensionPath(): string {
   const packaged = resourcePath('resources', 'browser-tools', 'index.ts');
   return packaged;

@@ -32,13 +32,19 @@ Electron + React + TypeScript recreation of the macOS SwiftUI PiChat client for 
 
 ## Requirements
 
-1. Windows 10/11.
-2. Node.js 20+.
-3. Pi coding agent installed and available in PATH:
+### Release builds
+
+1. Windows 10/11 x64.
+2. No separate Node.js or global `pi` install is required for normal chat usage; the packaged app bundles the Pi coding agent runtime.
+
+### Development builds
+
+1. Node.js 20+.
+2. Optional external Pi coding agent in PATH if you want to test against a global runtime instead of the bundled dependency:
    ```powershell
    npm install -g @mariozechner/pi-coding-agent
    ```
-4. Optional but recommended for the most reliable Browspi native host: .NET 8 SDK, used to build `PiChatNativeHost.exe`.
+3. Optional but recommended for the most reliable Browspi native host: .NET 8 SDK, used to build `PiChatNativeHost.exe`.
 
 ## Development
 
@@ -90,4 +96,5 @@ windows version/release/
   `HKCU\Software\Google\Chrome\NativeMessagingHosts\com.browspi.pi_bridge`.
 - Native host runtime files are installed here:
   `%LOCALAPPDATA%\PiChat\NativeHost`.
+- Release builds prefer the bundled Pi runtime. If the Settings → Pi Runtime field is changed from `pi` to a custom executable, the app uses that external runtime instead.
 - The app assumes upstream `pi --mode rpc` works on Windows. If the upstream pi package has platform-specific issues, the Electron client will surface the error and the runtime layer/upstream package must be fixed.

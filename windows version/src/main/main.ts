@@ -8,6 +8,7 @@ import { PiRPCClient } from './piRpcClient';
 import {
   addCustomModel,
   browserToolsExtensionPath,
+  bundledPiAuthStoragePath,
   configuredModelProviderIDs,
   configFile,
   defaultPiConfigDir,
@@ -262,9 +263,10 @@ try {
 } catch (error) { send({ type: 'error', message: error?.message ?? String(error) }); rl.close(); process.exit(1); }
 `;
   return await new Promise((resolve, reject) => {
+    const bundledAuthStorage = bundledPiAuthStoragePath();
     const proc = spawn(process.execPath, ['--input-type=module', '-e', script, providerId, authPath], {
       windowsHide: true,
-      env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }
+      env: { ...process.env, ELECTRON_RUN_AS_NODE: '1', ...(bundledAuthStorage ? { PI_AUTH_STORAGE_MODULE: bundledAuthStorage } : {}) }
     });
     activeOAuthProcess = proc;
     proc.stdout.setEncoding('utf8');

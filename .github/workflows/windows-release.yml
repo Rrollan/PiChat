@@ -46,16 +46,16 @@ jobs:
 
       - name: Create unpacked zip
         shell: pwsh
-        run: Compress-Archive -Path release/win-unpacked -DestinationPath release/PiChat-Windows-Unpacked-1.0.0-x64.zip -Force
+        run: Compress-Archive -Path release/win-unpacked -DestinationPath release/PiChat-Windows-Unpacked-1.0.1-x64.zip -Force
 
       - name: Checksums
         shell: pwsh
         run: |
           $files = @(
-            'release/PiChat-Windows-Setup-1.0.0-x64.exe',
-            'release/PiChat-Windows-Portable-1.0.0-x64.exe',
-            'release/PiChat-Windows-Unpacked-1.0.0-x64.zip',
-            'release/PiChat-Windows-Setup-1.0.0-x64.exe.blockmap'
+            'release/PiChat-Windows-Setup-1.0.1-x64.exe',
+            'release/PiChat-Windows-Portable-1.0.1-x64.exe',
+            'release/PiChat-Windows-Unpacked-1.0.1-x64.zip',
+            'release/PiChat-Windows-Setup-1.0.1-x64.exe.blockmap'
           )
           $lines = foreach ($file in $files) {
             $hash = (Get-FileHash $file -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -68,10 +68,10 @@ jobs:
         with:
           name: pichat-windows-release
           path: |
-            windows version/release/PiChat-Windows-Setup-1.0.0-x64.exe
-            windows version/release/PiChat-Windows-Portable-1.0.0-x64.exe
-            windows version/release/PiChat-Windows-Unpacked-1.0.0-x64.zip
-            windows version/release/PiChat-Windows-Setup-1.0.0-x64.exe.blockmap
+            windows version/release/PiChat-Windows-Setup-1.0.1-x64.exe
+            windows version/release/PiChat-Windows-Portable-1.0.1-x64.exe
+            windows version/release/PiChat-Windows-Unpacked-1.0.1-x64.zip
+            windows version/release/PiChat-Windows-Setup-1.0.1-x64.exe.blockmap
             windows version/release/SHA256SUMS.txt
 
       - name: Publish GitHub release
@@ -79,11 +79,11 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           name: PiChat Windows ${{ github.ref_name }}
-          body_path: docs/RELEASE_NOTES_WINDOWS_v1.0.0.md
+          body_path: docs/RELEASE_NOTES_WINDOWS_v1.0.1.md
           make_latest: false
           files: |
-            windows version/release/PiChat-Windows-Setup-1.0.0-x64.exe
-            windows version/release/PiChat-Windows-Portable-1.0.0-x64.exe
-            windows version/release/PiChat-Windows-Unpacked-1.0.0-x64.zip
-            windows version/release/PiChat-Windows-Setup-1.0.0-x64.exe.blockmap
+            windows version/release/PiChat-Windows-Setup-1.0.1-x64.exe
+            windows version/release/PiChat-Windows-Portable-1.0.1-x64.exe
+            windows version/release/PiChat-Windows-Unpacked-1.0.1-x64.zip
+            windows version/release/PiChat-Windows-Setup-1.0.1-x64.exe.blockmap
             windows version/release/SHA256SUMS.txt

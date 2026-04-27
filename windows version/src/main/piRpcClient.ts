@@ -4,13 +4,19 @@ import path from 'node:path';
 import fs from 'node:fs';
 import os from 'node:os';
 import type { AgentModel, AgentCommand, PiEvent, RpcState } from '../shared/types';
-import { expandHome } from './config';
+import { bundledPiCliPath, expandHome } from './config';
 
 interface PendingResponse {
   resolve: (value: any) => void;
   reject: (reason: Error) => void;
   timer: NodeJS.Timeout;
   commandType: string;
+}
+
+interface ResolvedPiCommand {
+  executable: string;
+  prefixArgs: string[];
+  bundled: boolean;
 }
 
 export interface RPCResponseData extends RpcState {
@@ -40,15 +46,16 @@ export class PiRPCClient extends EventEmitter {
     if (this.isRunning) return;
     this.shuttingDown = false;
 
-    const args = ['--mode', 'rpc', ...this.launchArguments];
-    const executable = this.resolveExecutable(expandHome(this.piPath || 'pi'));
+    const command = this.resolvePiCommand(expandHome(this.piPath || 'pi'));
+    const args = [...command.prefixArgs, '--mode', 'rpc', ...this.launchArguments];
+    const executable = command.executable;
     const cwd = expandHome(this.workingDirectory || os.homedir());
     if (!fs.existsSync(cwd) || !fs.statSync(cwd).isDirectory()) {
       throw new Error(`Working directory does not exist or is not a folder: ${cwd}`);
     }
 
-    const env = this.buildEnv();
-    const needsShell = process.platform === 'win32' && /\.(cmd|bat)$/i.test(executable);
+    const env = this.buildEnv(command.bundled);
+    const needsShell = !command.bundled && process.platform === 'win32' && /\.(cmd|bat)$/i.test(executable);
     this.debug(`[PI START] ${executable} ${args.join(' ')}`);
 
     await new Promise<void>((resolve, reject) => {
@@ -107,12 +114,26 @@ export class PiRPCClient extends EventEmitter {
     this.rejectAll(error);
   }
 
+  private resolvePiCommand(input: string): ResolvedPiCommand {
+    const normalized = expandHome(input.trim() || 'pi');
+    const looksLikePath = path.isAbsolute(normalized) || normalized.includes('/') || normalized.includes('\\');
+
+    if (!looksLikePath && normalized.toLowerCase() === 'pi') {
+      const bundledCli = bundledPiCliPath();
+      if (bundledCli) {
+        return { executable: process.execPath, prefixArgs: [bundledCli], bundled: true };
+      }
+    }
+
+    return { executable: this.resolveExecutable(normalized), prefixArgs: [], bundled: false };
+  }
+
   private resolveExecutable(input: string): string {
     const normalized = expandHome(input.trim() || 'pi');
     const looksLikePath = path.isAbsolute(normalized) || normalized.includes('/') || normalized.includes('\\');
     if (looksLikePath) return normalized;
 
-    const env = this.buildEnv();
+    const env = this.buildEnv(false);
     try {
       if (process.platform === 'win32') {
         const result = execFileSync('where.exe', [normalized], { env, encoding: 'utf8', windowsHide: true }).split(/\r?\n/).map(x => x.trim()).filter(Boolean)[0];
@@ -125,7 +146,7 @@ export class PiRPCClient extends EventEmitter {
     }
   }
 
-  private buildEnv(): NodeJS.ProcessEnv {
+  private buildEnv(useBundledPi = false): NodeJS.ProcessEnv {
     const env = { ...process.env };
     const home = os.homedir();
     const preferred = process.platform === 'win32'
@@ -139,6 +160,10 @@ export class PiRPCClient extends EventEmitter {
     const sep = path.delimiter;
     const current = (env.PATH || '').split(sep);
     env.PATH = [...new Set([...preferred, ...current].filter(Boolean))].join(sep);
+    if (useBundledPi) {
+      env.ELECTRON_RUN_AS_NODE = '1';
+      env.PICHAT_BUNDLED_PI = '1';
+    }
     return env;
   }
 

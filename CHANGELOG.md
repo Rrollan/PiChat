@@ -9,6 +9,13 @@ All notable changes to this project will be documented in this file.
 - Made logo resource loading resilient by avoiding fatal `Bundle.module` initialization during app startup
 - Updated macOS packaging to include the generated `PiChat_PiChat.bundle` under app resources in release builds
 
+## [Windows 1.0.1] - 2026-04-27
+
+### Fixed
+- Bundled the Pi coding agent runtime with the Windows app so first launch no longer fails with `spawn pi ENOENT`
+- Updated OAuth login to use the bundled Pi auth storage when available
+- Disabled installer auto-run from the final page to avoid confusing `.lnk` association errors on affected Windows systems
+
 ## [1.0.8] - 2026-04-25
 
 ### Added

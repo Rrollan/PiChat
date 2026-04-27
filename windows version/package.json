@@ -1,6 +1,6 @@
 {
   "name": "pichat-windows",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Windows desktop client for PiChat / pi coding agent",
   "private": true,
   "main": "dist/main/main.js",
@@ -15,6 +15,7 @@
     "verify:windows": "powershell -ExecutionPolicy Bypass -File scripts/verify-windows.ps1"
   },
   "dependencies": {
+    "@mariozechner/pi-coding-agent": "^0.70.2",
     "react": "latest",
     "react-dom": "latest"
   },
@@ -37,7 +38,12 @@
     },
     "files": [
       "dist/**/*",
-      "package.json"
+      "package.json",
+      "node_modules/**/*"
+    ],
+    "asarUnpack": [
+      "node_modules/@mariozechner/**/*",
+      "node_modules/@silvia-odwyer/**/*"
     ],
     "extraResources": [
       {
@@ -60,7 +66,8 @@
       "artifactName": "PiChat-Windows-Setup-${version}-${arch}.${ext}",
       "oneClick": false,
       "perMachine": false,
-      "allowToChangeInstallationDirectory": true
+      "allowToChangeInstallationDirectory": true,
+      "runAfterFinish": false
     },
     "portable": {
       "artifactName": "PiChat-Windows-Portable-${version}-${arch}.${ext}"
