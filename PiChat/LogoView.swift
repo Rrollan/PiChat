@@ -20,8 +20,8 @@ struct PiChatLogo: View {
             }
         }()
 
-        if let path = Bundle.module.path(forResource: fileName, ofType: "png"),
-           let nsImage = NSImage(contentsOfFile: path) {
+        if let url = PiChatResource.url(forResource: fileName, withExtension: "png"),
+           let nsImage = NSImage(contentsOf: url) {
             Image(nsImage: nsImage)
                 .resizable()
                 .scaledToFit()
@@ -31,5 +31,34 @@ struct PiChatLogo: View {
                 .scaledToFit()
                 .foregroundColor(.red)
         }
+    }
+}
+
+private enum PiChatResource {
+    static func url(forResource name: String, withExtension fileExtension: String) -> URL? {
+        if let url = Bundle.main.url(forResource: name, withExtension: fileExtension) {
+            return url
+        }
+
+        let bundleName = "PiChat_PiChat.bundle"
+        var bundleURLs = [Bundle.main.bundleURL.appendingPathComponent(bundleName)]
+
+        if let resourceURL = Bundle.main.resourceURL {
+            bundleURLs.append(resourceURL.appendingPathComponent(bundleName))
+        }
+
+        if let executableURL = Bundle.main.executableURL {
+            bundleURLs.append(executableURL.deletingLastPathComponent().appendingPathComponent(bundleName))
+        }
+
+        for bundleURL in bundleURLs {
+            guard let bundle = Bundle(url: bundleURL),
+                  let url = bundle.url(forResource: name, withExtension: fileExtension) else {
+                continue
+            }
+            return url
+        }
+
+        return nil
     }
 }

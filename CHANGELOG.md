@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.0.9] - 2026-04-27
+
+### Fixed
+- Fixed macOS release crash at launch when SwiftPM resource bundles were missing from the `.app` package
+- Made logo resource loading resilient by avoiding fatal `Bundle.module` initialization during app startup
+- Updated macOS packaging to include the generated `PiChat_PiChat.bundle` under app resources in release builds
+
 ## [1.0.8] - 2026-04-25
 
 ### Added
