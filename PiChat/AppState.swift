@@ -569,6 +569,15 @@ class AppState: ObservableObject {
                 logAgentError(message, context: "pi_stderr")
             }
 
+        case .processTerminated(let message):
+            isConnected = false
+            isStreaming = false
+            isWaitingForResponse = false
+            logAgentError(message, context: "pi_process")
+            if currentAssistantMessageIndex == nil {
+                show(notification: AppNotification(message: "pi stopped — will reconnect on next message", type: .warning))
+            }
+
         case .response(_, let command, let success, let error, let data):
             if command == "prompt", !success {
                 responseWatchdogTask?.cancel()
@@ -629,6 +638,8 @@ class AppState: ObservableObject {
         let text = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty || !attachedFiles.isEmpty || !pastedContents.isEmpty else { return }
 
+        guard await ensurePiIsRunningBeforePrompt() else { return }
+
         let pastedText = pastedContents.map { item in
             "\n\n--- Pasted content (\(item.wordCount) words) ---\n\(item.content)"
         }.joined()
@@ -658,6 +669,9 @@ class AppState: ObservableObject {
             try await rpc.prompt(promptText, images: images)
         } catch {
             responseWatchdogTask?.cancel()
+            if isPiNotRunningError(error.localizedDescription), await reconnectAndRetryPrompt(promptText: promptText, images: images, assistantIndex: assistantIndex) {
+                return
+            }
             if await retryPromptAfterAccountFailover(
                 promptText: promptText,
                 images: images,
@@ -674,6 +688,44 @@ class AppState: ObservableObject {
             logAgentError(error.localizedDescription, context: "prompt_send")
             addSystemMessage("❌ \(error.localizedDescription)")
         }
+    }
+
+    private func ensurePiIsRunningBeforePrompt() async -> Bool {
+        if rpc.isRunning { return true }
+        isConnected = false
+        show(notification: AppNotification(message: "pi stopped. Reconnecting…", type: .warning))
+        await connect(piPath: piPath, workingDirectory: startupDirectory)
+        if rpc.isRunning { return true }
+        let message = connectionError ?? "pi is not running"
+        logAgentError(message, context: "prompt_preflight")
+        addSystemMessage("❌ \(message)")
+        show(notification: AppNotification(message: message, type: .error))
+        return false
+    }
+
+    private func reconnectAndRetryPrompt(promptText: String, images: [RPCImage], assistantIndex: Int?) async -> Bool {
+        logAgentError("pi stopped during prompt send; reconnecting", context: "prompt_reconnect_retry")
+        show(notification: AppNotification(message: "pi stopped. Reconnecting and retrying…", type: .warning))
+        disconnect(clearMessages: false)
+        await connect(piPath: piPath, workingDirectory: startupDirectory)
+        guard rpc.isRunning else { return false }
+        if let idx = assistantIndex, messages.indices.contains(idx) {
+            messages[idx].isStreaming = true
+            currentAssistantMessageIndex = idx
+        }
+        isWaitingForResponse = true
+        startResponseWatchdog()
+        do {
+            try await rpc.prompt(promptText, images: images)
+            return true
+        } catch {
+            logAgentError(error.localizedDescription, context: "prompt_reconnect_retry_failed")
+            return false
+        }
+    }
+
+    private func isPiNotRunningError(_ message: String) -> Bool {
+        message.lowercased().contains("pi is not running") || message.lowercased().contains("process terminated")
     }
 
     private func retryPromptAfterAccountFailover(promptText: String, images: [RPCImage], failedError: String, assistantIndex: Int?) async -> Bool {

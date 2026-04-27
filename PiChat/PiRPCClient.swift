@@ -152,6 +152,7 @@ enum AgentEvent {
     case extensionError(extensionPath: String, event: String, error: String)
     case extensionUIRequest(id: String, method: String, title: String?, message: String?, options: [String]?, placeholder: String?, notifyType: String?, prefill: String?)
     case processStderr(message: String)
+    case processTerminated(message: String)
     case response(id: String?, command: String?, success: Bool, error: String?, data: RPCResponseData?)
 }
 
@@ -209,6 +210,7 @@ class PiRPCClient: ObservableObject {
     private var lineBuffer = ""
     private var requestCounter = 0
     private var readTask: Task<Void, Never>?
+    private var isStopping = false
 
     var piPath: String = "pi"
     var piNodePath: String?
@@ -221,6 +223,7 @@ class PiRPCClient: ObservableObject {
 
     func start() async throws {
         guard !isRunning else { return }
+        isStopping = false
 
         let proc = Process()
         if let cliScriptPath = piCliScriptPath {
@@ -292,12 +295,17 @@ class PiRPCClient: ObservableObject {
         proc.terminationHandler = { [weak self] _ in
             Task { @MainActor [weak self] in
                 guard let self = self else { return }
+                let wasStopping = self.isStopping
                 self.isRunning = false
                 self.isStreaming = false
+                self.isStopping = false
                 for (_, cont) in self.pendingResponses {
                     cont.resume(throwing: RPCError.commandFailed("Process terminated unexpectedly."))
                 }
                 self.pendingResponses.removeAll()
+                if !wasStopping {
+                    self.eventSubject.send(.processTerminated(message: "pi process terminated unexpectedly"))
+                }
             }
         }
 
@@ -347,6 +355,7 @@ class PiRPCClient: ObservableObject {
     }
 
     func stop() {
+        isStopping = true
         stdoutPipe?.fileHandleForReading.readabilityHandler = nil
         stderrPipe?.fileHandleForReading.readabilityHandler = nil
         readTask?.cancel()

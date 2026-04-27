@@ -190,7 +190,13 @@ function setupIpc(): void {
   ipcMain.handle('pi:connect', (_e, patch?: Partial<RuntimeSettings>) => connect(patch));
   ipcMain.handle('pi:disconnect', () => { rpc.stop(); return { ok: true }; });
   ipcMain.handle('pi:reconnect', async (_e, patch?: Partial<RuntimeSettings>) => { rpc.stop(); return connect(patch); });
-  ipcMain.handle('pi:prompt', (_e, payload: { message: string; images?: any[] }) => rpc.prompt(payload.message, payload.images || []));
+  ipcMain.handle('pi:prompt', async (_e, payload: { message: string; images?: any[] }) => {
+    if (!rpc.isRunning) {
+      send('pi:event', { type: 'process_stderr', message: 'pi stopped. Reconnecting…' });
+      await connect();
+    }
+    return rpc.prompt(payload.message, payload.images || []);
+  });
   ipcMain.handle('pi:abort', () => rpc.abort());
   ipcMain.handle('pi:newSession', () => rpc.newSession());
   ipcMain.handle('pi:compact', (_e, custom?: string) => rpc.compact(custom));
