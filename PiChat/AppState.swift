@@ -260,6 +260,7 @@ class AppState: ObservableObject {
     private var currentAssistantMessageIndex: Int?
     private var activeToolCallMap: [String: Int] = [:] // toolCallId -> index in activeTools
     private var responseWatchdogTask: Task<Void, Never>?
+    private var connectionGeneration = 0
     private var keyFeedbackTask: Task<Void, Never>?
     private var busyActionDepth = 0
     private var oauthHelperInputHandle: FileHandle?
@@ -362,6 +363,8 @@ class AppState: ObservableObject {
     // MARK: - Connect / Disconnect
 
     func connect(piPath: String? = nil, workingDirectory: String? = nil) async {
+        connectionGeneration += 1
+        let generation = connectionGeneration
         isStarting = true
         connectionError = nil
         let resolvedPiPath = (piPath ?? self.piPath).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "pi" : (piPath ?? self.piPath)
@@ -376,29 +379,57 @@ class AppState: ObservableObject {
         rpc.launchArguments = buildRpcLaunchArguments()
         rpc.enableDebugLogging = cliVerbose
 
+        defer {
+            if generation == connectionGeneration {
+                isStarting = false
+            }
+        }
+
         do {
+            try Task.checkCancellation()
             try await rpc.start()
+            guard generation == connectionGeneration else { return }
+            try Task.checkCancellation()
             isConnected = true
             // Give pi 800ms to initialize
-            try? await Task.sleep(nanoseconds: 800_000_000)
-            await loadInitialState()
+            try await Task.sleep(nanoseconds: 800_000_000)
+            guard generation == connectionGeneration else { return }
+            try Task.checkCancellation()
+            await loadInitialState(connectionGeneration: generation)
+        } catch is CancellationError {
+            if generation == connectionGeneration {
+                rpc.stop()
+                isConnected = false
+            }
         } catch {
+            guard generation == connectionGeneration else { return }
             if selectedRuntime?.source == .userUpdated, let bundledRuntime = piRuntimeManager.bundledRuntime() {
                 applyPiRuntime(bundledRuntime)
                 do {
+                    try Task.checkCancellation()
                     try await rpc.start()
+                    guard generation == connectionGeneration else { return }
+                    try Task.checkCancellation()
                     isConnected = true
                     show(notification: AppNotification(message: "Updated pi runtime failed; using bundled pi \(bundledRuntime.version).", type: .error))
-                    try? await Task.sleep(nanoseconds: 800_000_000)
-                    await loadInitialState()
+                    try await Task.sleep(nanoseconds: 800_000_000)
+                    guard generation == connectionGeneration else { return }
+                    try Task.checkCancellation()
+                    await loadInitialState(connectionGeneration: generation)
+                } catch is CancellationError {
+                    if generation == connectionGeneration {
+                        rpc.stop()
+                        isConnected = false
+                    }
                 } catch {
-                    connectionError = "Updated pi runtime failed, and bundled fallback also failed: \(error.localizedDescription)"
+                    if generation == connectionGeneration {
+                        connectionError = "Updated pi runtime failed, and bundled fallback also failed: \(error.localizedDescription)"
+                    }
                 }
             } else {
                 connectionError = error.localizedDescription
             }
         }
-        isStarting = false
     }
 
     @discardableResult
@@ -431,9 +462,11 @@ class AppState: ObservableObject {
     }
 
     func disconnect(clearMessages: Bool = true) {
+        connectionGeneration += 1
         responseWatchdogTask?.cancel()
         rpc.stop()
         isConnected = false
+        isStarting = false
         clearConversationTransientState(clearMessages: clearMessages)
     }
 
@@ -444,12 +477,13 @@ class AppState: ObservableObject {
         await connect(piPath: piPath, workingDirectory: newDirectory)
     }
 
-    private func loadInitialState() async {
+    private func loadInitialState(connectionGeneration expectedGeneration: Int? = nil) async {
         async let state = try? rpc.getState()
         async let models = (try? rpc.getAvailableModels()) ?? []
         async let cmds = (try? rpc.getCommands()) ?? []
 
         let (s, m, c) = await (state, models, cmds)
+        if let expectedGeneration, expectedGeneration != connectionGeneration { return }
 
         if let s {
             applyState(s)
@@ -612,6 +646,10 @@ class AppState: ObservableObject {
             isConnected = false
             isStreaming = false
             isWaitingForResponse = false
+            if isStarting {
+                isStarting = false
+                connectionError = message
+            }
             logAgentError(message, context: "pi_process")
             if currentAssistantMessageIndex == nil {
                 show(notification: AppNotification(message: "pi stopped — will reconnect on next message", type: .warning))

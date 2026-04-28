@@ -211,6 +211,7 @@ class PiRPCClient: ObservableObject {
     private var requestCounter = 0
     private var readTask: Task<Void, Never>?
     private var isStopping = false
+    private var processGeneration = 0
 
     var piPath: String = "pi"
     var piNodePath: String?
@@ -224,8 +225,11 @@ class PiRPCClient: ObservableObject {
     func start() async throws {
         guard !isRunning else { return }
         isStopping = false
+        processGeneration += 1
+        let launchGeneration = processGeneration
 
         let proc = Process()
+        let procIdentifier = ObjectIdentifier(proc)
         if let cliScriptPath = piCliScriptPath {
             let scriptPath = NSString(string: cliScriptPath).expandingTildeInPath
             guard FileManager.default.fileExists(atPath: scriptPath) else {
@@ -295,14 +299,29 @@ class PiRPCClient: ObservableObject {
         proc.terminationHandler = { [weak self] _ in
             Task { @MainActor [weak self] in
                 guard let self = self else { return }
+                guard self.processGeneration == launchGeneration,
+                      let currentProcess = self.process,
+                      ObjectIdentifier(currentProcess) == procIdentifier else {
+                    return
+                }
+
                 let wasStopping = self.isStopping
+                let pending = self.pendingResponses
+                self.pendingResponses.removeAll()
+                self.stdoutPipe?.fileHandleForReading.readabilityHandler = nil
+                self.stderrPipe?.fileHandleForReading.readabilityHandler = nil
+                self.process = nil
+                self.stdinPipe = nil
+                self.stdoutPipe = nil
+                self.stderrPipe = nil
                 self.isRunning = false
                 self.isStreaming = false
                 self.isStopping = false
-                for (_, cont) in self.pendingResponses {
+                self.lineBuffer = ""
+
+                for (_, cont) in pending {
                     cont.resume(throwing: RPCError.commandFailed("Process terminated unexpectedly."))
                 }
-                self.pendingResponses.removeAll()
                 if !wasStopping {
                     self.eventSubject.send(.processTerminated(message: "pi process terminated unexpectedly"))
                 }
@@ -355,10 +374,15 @@ class PiRPCClient: ObservableObject {
     }
 
     func stop() {
+        processGeneration += 1
         isStopping = true
         stdoutPipe?.fileHandleForReading.readabilityHandler = nil
         stderrPipe?.fileHandleForReading.readabilityHandler = nil
         readTask?.cancel()
+
+        let pending = pendingResponses
+        pendingResponses.removeAll()
+
         process?.terminate()
         process = nil
         stdinPipe = nil
@@ -366,8 +390,12 @@ class PiRPCClient: ObservableObject {
         stderrPipe = nil
         isRunning = false
         isStreaming = false
+        isStopping = false
         lineBuffer = ""
-        pendingResponses.removeAll()
+
+        for (_, cont) in pending {
+            cont.resume(throwing: RPCError.commandFailed("Process stopped."))
+        }
     }
 
     // MARK: - Reading

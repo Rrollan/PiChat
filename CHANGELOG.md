@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.0.15] - 2026-04-28
+
+### Fixed
+- Fixed an infinite loading state after switching projects by isolating stale RPC process termination callbacks from new connections
+- Made project reconnects generation-aware so old async startup/state loads no longer overwrite the active connection
+- Ensured pending RPC requests are completed when the pi process is stopped, preventing suspended startup tasks
+
 ## [1.0.14] - 2026-04-28
 
 ### Fixed
